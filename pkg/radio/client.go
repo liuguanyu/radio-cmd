@@ -17,14 +17,14 @@ const (
 
 // Category represents a radio station category
 type Category struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID           string `json:"id"`
+	CategoryName string `json:"categoryName"`
 }
 
 // Province represents a province for regional stations
 type Province struct {
-	Code string `json:"code"`
-	Name string `json:"name"`
+	Code        int    `json:"provinceCode"`
+	ProvinceName string `json:"provinceName"`
 }
 
 // Client is the radio.cn API client
