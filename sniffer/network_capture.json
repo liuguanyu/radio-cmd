@@ -1,0 +1,467 @@
+{
+  "api_requests": [
+    "https://ytmedia.radio.cn/CCYT%2F202306%2F12%2F18%2F22NcNJxAjbe3NgbLCNZfH6fWW2q6VhCo2W2023061218376.jpg",
+    "https://ytmsout.radio.cn/web/appBroadcast/listenbackList/?provinceCode=",
+    "https://ytmedia.radio.cn/CCYT%2F202302%2F09%2F16%2F78TPTKDEspxwVe2m9DzSNW2xBHcNHIIUkkF2023020916167.png",
+    "https://ytmsout.radio.cn/web/appProvince/list/all",
+    "https://ytmsout.radio.cn/web/appBroadcast/list?categoryId=0&provinceCode=0",
+    "https://ytmedia.radio.cn/CCYT%2F202302%2F09%2F17%2FHRdlznt8YcKTRJdZsE8SXJRsFzZaVJlJJ2023020917172.png",
+    "https://ytmedia.radio.cn/CCYT%2F202306%2F12%2F18%2FTmqb0FNuYzW6u5Ym7LhxxSemBelX3h7I70gh2023061218805.jpg",
+    "https://www.radio.cn/pc-portal/js/api.js?062",
+    "https://ytmsout.radio.cn/web/appCategory/list/all",
+    "https://www.radio.cn/pc-portal/js/hiradio.min.js?111",
+    "https://www.radio.cn/pc-portal/favicon.ico",
+    "https://www.radio.cn/pc-portal/image/left_arrow.gif",
+    "https://www.radio.cn/pc-portal/image/bofang.png",
+    "https://ytmsout.radio.cn/web/appProgram/listByDate?date=2026-04-16&broadcastId=639",
+    "https://www.radio.cn/pc-portal/image/tvbg.png",
+    "https://www.radio.cn/pc-portal/css/global.css?102",
+    "https://www.radio.cn/pc-portal/image/email.jpg",
+    "https://www.radio.cn/pc-portal/js/register.js?0732",
+    "https://ytmedia.radio.cn/25010/adfile/202311/09/17/5FXrZWPJp8CDoNPuD4FeEIZL73X1XbqggPosRo4PYBwasg4w12023110917670.jpg",
+    "https://www.radio.cn/pc-portal/image/icon_18.png",
+    "https://www.radio.cn/pc-portal/image/lock.jpg",
+    "https://www.radio.cn/pc-portal/js/bofang.js?0612",
+    "https://www.radio.cn/pc-portal/image/qq.jpg",
+    "https://www.radio.cn/pc-portal/css/register.css?0731",
+    "https://ytmedia.radio.cn/CCYT%2F202302%2F09%2F16%2FooaRWbtET4tHDAMFR2023020916528.png",
+    "https://www.radio.cn/pc-portal/image/icon_17.gif",
+    "https://www.radio.cn/pc-portal/erji/radioStation.html",
+    "https://ytmedia.radio.cn/CCYT%2F202306%2F12%2F18%2Fzmco8RqfK6wcZu7BZCv2023061218737.jpg",
+    "https://ytmedia.radio.cn/CCYT%2F202306%2F12%2F18%2F1E202306121836.jpg",
+    "https://www.radio.cn/pc-portal/image/play.png",
+    "https://www.radio.cn/pc-portal/js/jquery.imageScroller.js",
+    "https://www.radio.cn/pc-portal/image/voice.png",
+    "https://ytmedia.radio.cn/25010/adfile/202310/13/16/Gtr71eiTMz8Lzs5tcaZD4wq2frDAeLqMX3Es90BIk0uCti2023101316420.jpg",
+    "https://www.radio.cn/pc-portal/image/turight_arrow.gif",
+    "https://www.radio.cn/pc-portal/js/crypto-js.min.js",
+    "https://ytmedia.radio.cn/CCYT%2F202302%2F09%2F17%2FyxIcj6Jaem8nTuSZiQGzESHnX2023020917766.png",
+    "https://www.radio.cn/pc-portal/js/jquery-migrate-1.4.1.min.js",
+    "https://www.radio.cn/pc-portal/js/redis-ip.js",
+    "https://www.radio.cn/pc-portal/js/dataParse.js",
+    "https://www.radio.cn/pc-portal/js/jquery-ui.min.js",
+    "https://www.radio.cn/pc-portal/js/jquery-3.6.0.min.js",
+    "https://www.radio.cn/pc-portal/image/user.jpg",
+    "https://www.radio.cn/pc-portal/js/encrypt.js",
+    "https://www.radio.cn/pc-portal/js/jquery.cookie.js",
+    "https://www.radio.cn/pc-portal/image/logo01.jpg",
+    "https://www.radio.cn/pc-portal/image/prev.png",
+    "https://ytmedia.radio.cn/CCYT%2F202505%2F19%2F18%2F8jLzVYGQuoQrHLIljfYQxUeOssaU12f5xAiFGZr2025051918831.jpg",
+    "https://www.radio.cn/pc-portal/image/icon_32.jpg",
+    "https://ytmedia.radio.cn/25010/adfile/202310/13/16/QVkMVRVlYkS5QIqxueAPtPg4hx99yGnmX9QG7Jnzdw2023101316660.jpg",
+    "https://www.radio.cn/pc-portal/image/icon_27.gif",
+    "https://ytmedia.radio.cn/CCYT%2F202302%2F09%2F16%2FUgh1gKpGMpZRjhaxOz3lk4xS2023020916974.png",
+    "https://www.radio.cn/pc-portal/css/styleRadio.css",
+    "https://www.radio.cn/pc-portal/image/code.png",
+    "https://www.radio.cn/pc-portal/js/sdkconfig.js",
+    "https://www.radio.cn/pc-portal/image/icon_13.gif",
+    "https://ytmedia.radio.cn/CCYT%2F202302%2F10%2F14%2FpDZEJjU92023021014157.png",
+    "https://ytmedia.radio.cn/CCYT%2F202302%2F09%2F17%2Fj5t4Bt3drpLhkZnDREc2023020917793.png",
+    "https://www.radio.cn/pc-portal/image/next.png",
+    "https://ytmedia.radio.cn/25010/adfile/202604/10/14/F02h0R2026041014423.jpg",
+    "https://www.radio.cn/pc-portal/image/right_arrow.gif",
+    "https://ytmedia.radio.cn/25010/adfile/202310/13/17/Vdr0aD733JLDXao4HZ5HYR6osONcAvIV1hZRiZOzTon2023101317621.jpg",
+    "https://www.radio.cn/pc-portal/image/sh.jpg",
+    "https://www.radio.cn/pc-portal/css/style.css?1029",
+    "https://www.radio.cn/pc-portal/image/beian-icon.png",
+    "https://ytmedia.radio.cn/CCYT%2F202302%2F10%2F14%2F9iLXHwkkaOWXQtMFpl2023021014630.png",
+    "https://ytmedia.radio.cn/25010/adfile/202310/13/16/pUugab0CYIwg1hEFuid2023101316616.jpg",
+    "https://www.radio.cn/pc-portal/image/tuleft_arrow.gif",
+    "https://www.radio.cn/pc-portal/css/jquery-ui.min.css"
+  ],
+  "media_requests": [],
+  "potential_stations": [
+    {
+      "text": "新闻",
+      "class": "box",
+      "id": "",
+      "onclick": "chooseType('9');return false;",
+      "href": null
+    },
+    {
+      "text": "新闻",
+      "class": "",
+      "id": "",
+      "onclick": null,
+      "href": "javascript:;"
+    },
+    {
+      "text": "交通",
+      "class": "box",
+      "id": "",
+      "onclick": "chooseType('15');return false;",
+      "href": null
+    },
+    {
+      "text": "交通",
+      "class": "",
+      "id": "",
+      "onclick": null,
+      "href": "javascript:;"
+    },
+    {
+      "text": "音乐",
+      "class": "box",
+      "id": "",
+      "onclick": "chooseType('5');return false;",
+      "href": null
+    },
+    {
+      "text": "音乐",
+      "class": "",
+      "id": "",
+      "onclick": null,
+      "href": "javascript:;"
+    },
+    {
+      "text": "中国之声",
+      "class": "",
+      "id": "",
+      "onclick": "chooseRadio('639')",
+      "href": null
+    },
+    {
+      "text": "中国之声",
+      "class": "",
+      "id": "",
+      "onclick": null,
+      "href": "javascript:;"
+    },
+    {
+      "text": "经济之声",
+      "class": "",
+      "id": "",
+      "onclick": "chooseRadio('640')",
+      "href": null
+    },
+    {
+      "text": "经济之声",
+      "class": "",
+      "id": "",
+      "onclick": null,
+      "href": "javascript:;"
+    },
+    {
+      "text": "音乐之声",
+      "class": "",
+      "id": "",
+      "onclick": "chooseRadio('641')",
+      "href": null
+    },
+    {
+      "text": "音乐之声",
+      "class": "",
+      "id": "",
+      "onclick": null,
+      "href": "javascript:;"
+    },
+    {
+      "text": "经典音乐广播",
+      "class": "",
+      "id": "",
+      "onclick": "chooseRadio('642')",
+      "href": null
+    },
+    {
+      "text": "经典音乐广播",
+      "class": "",
+      "id": "",
+      "onclick": null,
+      "href": "javascript:;"
+    },
+    {
+      "text": "台海之声",
+      "class": "",
+      "id": "",
+      "onclick": "chooseRadio('643')",
+      "href": null
+    },
+    {
+      "text": "台海之声",
+      "class": "",
+      "id": "",
+      "onclick": null,
+      "href": "javascript:;"
+    },
+    {
+      "text": "神州之声",
+      "class": "",
+      "id": "",
+      "onclick": "chooseRadio('644')",
+      "href": null
+    },
+    {
+      "text": "神州之声",
+      "class": "",
+      "id": "",
+      "onclick": null,
+      "href": "javascript:;"
+    },
+    {
+      "text": "大湾区之声",
+      "class": "",
+      "id": "",
+      "onclick": "chooseRadio('645')",
+      "href": null
+    },
+    {
+      "text": "大湾区之声",
+      "class": "",
+      "id": "",
+      "onclick": null,
+      "href": "javascript:;"
+    },
+    {
+      "text": "香港之声",
+      "class": "",
+      "id": "",
+      "onclick": "chooseRadio('646')",
+      "href": null
+    },
+    {
+      "text": "香港之声",
+      "class": "",
+      "id": "",
+      "onclick": null,
+      "href": "javascript:;"
+    },
+    {
+      "text": "民族之声",
+      "class": "",
+      "id": "",
+      "onclick": "chooseRadio('647')",
+      "href": null
+    },
+    {
+      "text": "民族之声",
+      "class": "",
+      "id": "",
+      "onclick": null,
+      "href": "javascript:;"
+    },
+    {
+      "text": "文艺之声",
+      "class": "",
+      "id": "",
+      "onclick": "chooseRadio('648')",
+      "href": null
+    },
+    {
+      "text": "文艺之声",
+      "class": "",
+      "id": "",
+      "onclick": null,
+      "href": "javascript:;"
+    },
+    {
+      "text": "老年之声",
+      "class": "",
+      "id": "",
+      "onclick": "chooseRadio('649')",
+      "href": null
+    },
+    {
+      "text": "老年之声",
+      "class": "",
+      "id": "",
+      "onclick": null,
+      "href": "javascript:;"
+    },
+    {
+      "text": "藏语广播",
+      "class": "",
+      "id": "",
+      "onclick": "chooseRadio('650')",
+      "href": null
+    },
+    {
+      "text": "藏语广播",
+      "class": "",
+      "id": "",
+      "onclick": null,
+      "href": "javascript:;"
+    },
+    {
+      "text": "维吾尔语广播",
+      "class": "",
+      "id": "",
+      "onclick": "chooseRadio('651')",
+      "href": null
+    },
+    {
+      "text": "维吾尔语广播",
+      "class": "",
+      "id": "",
+      "onclick": null,
+      "href": "javascript:;"
+    },
+    {
+      "text": "中国交通广播",
+      "class": "",
+      "id": "",
+      "onclick": "chooseRadio('653')",
+      "href": null
+    },
+    {
+      "text": "中国交通广播",
+      "class": "",
+      "id": "",
+      "onclick": null,
+      "href": "javascript:;"
+    },
+    {
+      "text": "中国乡村之声",
+      "class": "",
+      "id": "",
+      "onclick": "chooseRadio('654')",
+      "href": null
+    },
+    {
+      "text": "中国乡村之声",
+      "class": "",
+      "id": "",
+      "onclick": null,
+      "href": "javascript:;"
+    },
+    {
+      "text": "哈萨克语广播",
+      "class": "",
+      "id": "",
+      "onclick": "chooseRadio('655')",
+      "href": null
+    },
+    {
+      "text": "哈萨克语广播",
+      "class": "",
+      "id": "",
+      "onclick": null,
+      "href": "javascript:;"
+    },
+    {
+      "text": "南海之声",
+      "class": "",
+      "id": "",
+      "onclick": "chooseRadio('664')",
+      "href": null
+    },
+    {
+      "text": "南海之声",
+      "class": "",
+      "id": "",
+      "onclick": null,
+      "href": "javascript:;"
+    },
+    {
+      "text": "环球资讯广播",
+      "class": "",
+      "id": "",
+      "onclick": "chooseRadio('692')",
+      "href": null
+    },
+    {
+      "text": "环球资讯广播",
+      "class": "",
+      "id": "",
+      "onclick": null,
+      "href": "javascript:;"
+    },
+    {
+      "text": "英语资讯广播 CGTN Radio",
+      "class": "",
+      "id": "",
+      "onclick": "chooseRadio('734')",
+      "href": null
+    },
+    {
+      "text": "英语资讯广播 CGTN Radio",
+      "class": "",
+      "id": "",
+      "onclick": null,
+      "href": "javascript:;"
+    },
+    {
+      "text": "昨日新闻重现",
+      "class": "",
+      "id": "",
+      "onclick": "playLiveRecordProxy('https://ytrecordbroadcast.radio.cn/echo/2/2963630829427254226.m4a?e=0&ps=1&r=1','昨日新闻重现','','639','1395539');",
+      "href": "javascript:;"
+    },
+    {
+      "text": "新闻有观点（重播）",
+      "class": "",
+      "id": "",
+      "onclick": "playLiveRecordProxy('https://ytrecordbroadcast.radio.cn/echo/2/2963630829427254268.m4a?e=0&ps=1&r=1','新闻有观点（重播）','','639','1396890');",
+      "href": "javascript:;"
+    },
+    {
+      "text": "新闻和报纸摘要",
+      "class": "",
+      "id": "",
+      "onclick": "playLiveRecordProxy('https://ytrecordbroadcast.radio.cn/echo/2/2963630829427254429.m4a?e=0&ps=1&r=1','新闻和报纸摘要','','639','1395528');",
+      "href": "javascript:;"
+    },
+    {
+      "text": "新闻纵横",
+      "class": "",
+      "id": "",
+      "onclick": "playLiveRecordProxy('https://ytrecordbroadcast.radio.cn/echo/2/2963630829427254587.m4a?e=0&ps=1&r=1','新闻纵横','','639','1395529');",
+      "href": "javascript:;"
+    },
+    {
+      "text": "新闻和报纸摘要（重播）",
+      "class": "",
+      "id": "",
+      "onclick": "playLiveRecordProxy('https://ytrecordbroadcast.radio.cn/echo/2/2963630829427254626.m4a?e=0&ps=1&r=1','新闻和报纸摘要（重播）','','639','1396550');",
+      "href": "javascript:;"
+    },
+    {
+      "text": "新闻进行时",
+      "class": "",
+      "id": "",
+      "onclick": "playLiveRecordProxy('https://ytrecordbroadcast.radio.cn/echo/2/2963630829427254784.m4a?e=0&ps=1&r=1','新闻进行时','','639','1396551');",
+      "href": "javascript:;"
+    },
+    {
+      "text": "新闻进行时",
+      "class": "",
+      "id": "",
+      "onclick": "playLiveRecordProxy('https://ytrecordbroadcast.radio.cn/echo/2/2963630829427255128.m4a?e=0&ps=1&r=1','新闻进行时','','639','1396551');",
+      "href": "javascript:;"
+    },
+    {
+      "text": "新闻晚高峰",
+      "class": "",
+      "id": "",
+      "onclick": "playLiveRecordProxy('https://ytrecordbroadcast.radio.cn/echo/2/2963630829427255260.m4a?e=0&ps=1&r=1','新闻晚高峰','','639','1396552');",
+      "href": "javascript:;"
+    },
+    {
+      "text": "全国新闻联播",
+      "class": "",
+      "id": "",
+      "onclick": "playLiveRecordProxy('','全国新闻联播','','639','1396056');",
+      "href": "javascript:;"
+    },
+    {
+      "text": "新闻有观点",
+      "class": "",
+      "id": "",
+      "onclick": "playLiveRecordProxy('','新闻有观点','','639','1396885');",
+      "href": "javascript:;"
+    },
+    {
+      "text": "全国新闻联播（重播）",
+      "class": "",
+      "id": "",
+      "onclick": "playLiveRecordProxy('','全国新闻联播（重播）','','639','1396554');",
+      "href": "javascript:;"
+    },
+    {
+      "text": "新闻超链接",
+      "class": "",
+      "id": "",
+      "onclick": "playLiveRecordProxy('','新闻超链接','','639','1396886');",
+      "href": "javascript:;"
+    }
+  ]
+}
