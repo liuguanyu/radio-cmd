@@ -20,8 +20,12 @@ type Styles struct {
 	Help             lipgloss.Style
 	Error            lipgloss.Style
 	Loading          lipgloss.Style
-	Category         lipgloss.Style
-	CategorySelected lipgloss.Style
+	Province         lipgloss.Style
+	ProvinceSelected lipgloss.Style
+	Panel            lipgloss.Style
+	PanelTitle       lipgloss.Style
+	Subtitle         lipgloss.Style
+	Muted            lipgloss.Style
 }
 
 // NewStyles creates a new set of styles
@@ -36,11 +40,11 @@ func NewStyles() *Styles {
 		Selected: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("15")).
 			Background(lipgloss.Color("63")).
-			Padding(0, 2),
+			Padding(0, 1),
 
 		Normal: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("252")).
-			Padding(0, 2),
+			Padding(0, 1),
 
 		Status: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("15")).
@@ -60,39 +64,49 @@ func NewStyles() *Styles {
 			Background(lipgloss.Color("63")).
 			Padding(2, 4),
 
-		Category: lipgloss.NewStyle().
+		Province: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("244")).
 			Padding(0, 1),
 
-		CategorySelected: lipgloss.NewStyle().
+		ProvinceSelected: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("15")).
 			Background(lipgloss.Color("63")).
 			Padding(0, 1),
+
+		Panel: lipgloss.NewStyle().
+			Padding(0, 1),
+
+		PanelTitle: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("81")),
+
+		Subtitle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")),
+
+		Muted: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("241")),
 	}
 }
 
 // App represents the main TUI application
 type App struct {
-	client       *radio.Client
-	player       *radio.Player
-	cfg          *config.Config
-	stations     []radio.Station
-	cursor       int
-	loading      bool
-	err          error
-	width        int
-	height       int
-	lastError    string
-	needsRefresh bool
-	styles       *Styles
+	client        *radio.Client
+	player        *radio.Player
+	cfg           *config.Config
+	stations      []radio.Station
+	cursor        int
+	loading       bool
+	inlineLoading bool
+	err           error
+	width         int
+	height        int
+	lastError     string
+	needsRefresh  bool
+	styles        *Styles
 
-	// 分类和省份筛选状态
-	categoryFilter string  // 当前选择的分类ID，"0"表示所有
-	provinceFilter string  // 当前选择的省份Code（字符串），"0"表示所有
-	categories     []radio.Category  // 所有分类
-	provinces      []radio.Province  // 所有省份
-	showCategories bool  // 是否显示分类选择
-	showProvinces  bool  // 是否显示省份选择
+	provinceFilter string
+	provinces      []radio.Province
+	provinceCursor int
 }
 
 // NewApp creates a new TUI application
@@ -108,14 +122,12 @@ func NewApp() *App {
 		cfg:            cfg,
 		loading:        true,
 		styles:         NewStyles(),
-		categoryFilter: cfg.DefaultCategory,
-		provinceFilter: cfg.DefaultProvince, // 从配置读取为字符串
+		provinceFilter: cfg.DefaultProvince,
 	}
 }
 
 // Start launches the TUI application
 func (a *App) Start() error {
-	// Check for audio player dependencies
 	if err := radio.CheckDependencies(); err != nil {
 		return fmt.Errorf("dependency check failed:\n%w", err)
 	}
@@ -129,7 +141,6 @@ func (a *App) Start() error {
 func (a *App) Init() tea.Cmd {
 	return tea.Batch(
 		a.fetchStations,
-		a.fetchCategories,
 		a.fetchProvinces,
 	)
 }
@@ -142,30 +153,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case stationsFetchedMsg:
 		a.loading = false
+		a.inlineLoading = false
 		if msg.err != nil {
 			a.err = msg.err
 			a.lastError = fmt.Sprintf("Failed to fetch stations: %v", msg.err)
 			return a, nil
 		}
+		a.err = nil
 		a.stations = msg.stations
 		a.needsRefresh = false
-		return a, nil
-
-	case categoriesFetchedMsg:
-		if msg.err != nil {
-			a.err = msg.err
-			a.lastError = fmt.Sprintf("Failed to fetch categories: %v", msg.err)
-			return a, nil
-		}
-		a.categories = msg.categories
-		// 如果配置中有默认分类，选择它
-		if a.categoryFilter != "0" {
-			for i, cat := range a.categories {
-				if cat.ID == a.categoryFilter {
-					a.cursor = i
-					break
-				}
-			}
+		if len(a.stations) == 0 {
+			a.cursor = 0
+		} else if a.cursor >= len(a.stations) {
+			a.cursor = len(a.stations) - 1
 		}
 		return a, nil
 
@@ -175,23 +175,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.lastError = fmt.Sprintf("Failed to fetch provinces: %v", msg.err)
 			return a, nil
 		}
-		a.provinces = msg.provinces
-		// 如果配置中有默认省份，选择它
-		if a.provinceFilter != "0" {
-			// provinceFilter是字符串，需要转换为int进行比较
-			if filterInt, err := strconv.Atoi(a.provinceFilter); err == nil {
-				for i, prov := range a.provinces {
-					if prov.Code == filterInt {
-						a.cursor = i
-						break
-					}
-				}
-			}
-		}
+		a.provinces = append([]radio.Province{{Code: 0, ProvinceName: "全部"}}, msg.provinces...)
+		a.syncProvinceCursor()
 		return a, nil
 
 	case tea.WindowSizeMsg:
-		// Handle window resize
 		a.width = msg.Width
 		a.height = msg.Height
 		return a, nil
@@ -202,7 +190,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View implements tea.Model
 func (a *App) View() string {
-	if a.loading {
+	if a.loading && len(a.stations) == 0 {
 		return a.renderLoading()
 	}
 
@@ -210,17 +198,6 @@ func (a *App) View() string {
 		return a.renderError()
 	}
 
-	// 如果正在显示分类选择
-	if a.showCategories {
-		return a.renderCategorySelection()
-	}
-
-	// 如果正在显示省份选择
-	if a.showProvinces {
-		return a.renderProvinceSelection()
-	}
-
-	// 默认：电台列表界面
 	return a.renderMainUI()
 }
 
@@ -230,25 +207,15 @@ type stationsFetchedMsg struct {
 	err      error
 }
 
-type categoriesFetchedMsg struct {
-	categories []radio.Category
-	err         error
-}
-
 type provincesFetchedMsg struct {
 	provinces []radio.Province
-	err        error
+	err       error
 }
 
 // Commands
 func (a *App) fetchStations() tea.Msg {
-	stations, err := a.client.GetStationsByFilter(a.categoryFilter, a.provinceFilter)
+	stations, err := a.client.GetStationsByFilter("0", a.provinceFilter)
 	return stationsFetchedMsg{stations: stations, err: err}
-}
-
-func (a *App) fetchCategories() tea.Msg {
-	categories, err := a.client.GetCategories()
-	return categoriesFetchedMsg{categories: categories, err: err}
 }
 
 func (a *App) fetchProvinces() tea.Msg {
@@ -258,20 +225,8 @@ func (a *App) fetchProvinces() tea.Msg {
 
 // Key handling
 func (a *App) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// 如果正在显示分类选择
-	if a.showCategories {
-		return a.handleCategoryKeyPress(msg)
-	}
-
-	// 如果正在显示省份选择
-	if a.showProvinces {
-		return a.handleProvinceKeyPress(msg)
-	}
-
-	// 默认：电台列表界面
 	switch msg.String() {
 	case "ctrl+c", "q":
-		// Cleanup and exit
 		a.player.Stop()
 		return a, tea.Quit
 
@@ -285,114 +240,72 @@ func (a *App) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.cursor++
 		}
 
+	case "left", "a":
+		if a.provinceCursor > 0 {
+			a.provinceCursor--
+			return a, a.applyProvinceSelection()
+		}
+
+	case "right", "d":
+		if a.provinceCursor < len(a.provinces)-1 {
+			a.provinceCursor++
+			return a, a.applyProvinceSelection()
+		}
+
 	case "enter", " ":
 		if len(a.stations) > 0 {
 			station := &a.stations[a.cursor]
 			if err := a.player.Play(station); err != nil {
 				a.err = err
+				a.lastError = err.Error()
 			}
 		}
 
-	case "s":
-		// Stop playback
+	case "x":
 		a.player.Stop()
 
 	case "r":
-		// Refresh station list
 		a.loading = true
 		return a, a.fetchStations
-
-	case "c":
-		// Show category selection
-		a.showCategories = true
-		a.cursor = 0
-		return a, nil
-
-	case "p":
-		// Show province selection
-		a.showProvinces = true
-		a.cursor = 0
-		return a, nil
 	}
 
 	return a, nil
 }
 
-// handleCategoryKeyPress handles key press in category selection mode
-func (a *App) handleCategoryKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c", "q":
-		a.showCategories = false
-		a.cursor = 0
-		return a, nil
-
-	case "up", "k":
-		if a.cursor > 0 {
-			a.cursor--
-		}
-
-	case "down", "j":
-		if a.cursor < len(a.categories)-1 {
-			a.cursor++
-		}
-
-	case "enter", " ":
-		// Select category
-		if len(a.categories) > 0 {
-			selected := a.categories[a.cursor]
-			a.categoryFilter = selected.ID
-			a.showCategories = false
-			a.cursor = 0
-			a.loading = true
-			return a, a.fetchStations
-		}
-
-	case "escape":
-		a.showCategories = false
-		a.cursor = 0
-		return a, nil
+func (a *App) applyProvinceSelection() tea.Cmd {
+	if len(a.provinces) == 0 || a.provinceCursor >= len(a.provinces) {
+		return nil
 	}
 
-	return a, nil
+	selected := a.provinces[a.provinceCursor]
+	a.provinceFilter = strconv.Itoa(selected.Code)
+	a.cursor = 0
+	a.loading = true
+	a.inlineLoading = true
+	a.err = nil
+	a.lastError = ""
+	return a.fetchStations
 }
 
-// handleProvinceKeyPress handles key press in province selection mode
-func (a *App) handleProvinceKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c", "q":
-		a.showProvinces = false
-		a.cursor = 0
-		return a, nil
-
-	case "up", "k":
-		if a.cursor > 0 {
-			a.cursor--
-		}
-
-	case "down", "j":
-		if a.cursor < len(a.provinces)-1 {
-			a.cursor++
-		}
-
-	case "enter", " ":
-		// Select province
-		if len(a.provinces) > 0 {
-			selected := a.provinces[a.cursor]
-			// 将省份Code（int）转换为字符串
-			a.provinceFilter = strconv.Itoa(selected.Code)
-			a.showProvinces = false
-			a.cursor = 0
-			a.loading = true
-			return a, a.fetchStations
-		}
-
-	case "escape":
-		a.showProvinces = false
-		a.cursor = 0
-		return a, nil
+func (a *App) syncProvinceCursor() {
+	if len(a.provinces) == 0 {
+		a.provinceCursor = 0
+		return
 	}
 
-	return a, nil
+	filterInt, err := strconv.Atoi(a.provinceFilter)
+	if err != nil {
+		filterInt = 0
+	}
+
+	for i, prov := range a.provinces {
+		if prov.Code == filterInt {
+			a.provinceCursor = i
+			return
+		}
+	}
+
+	a.provinceCursor = 0
 }
 
 // Rendering functions
@@ -411,116 +324,176 @@ func (a *App) renderError() string {
 func (a *App) renderMainUI() string {
 	var b strings.Builder
 
-	// Title
-	title := a.styles.Title.Render("📻 Radio.cn CLI Player")
-	b.WriteString(title + "\n\n")
-
-	// Station list
-	listHeight := min(len(a.stations), a.height-8) // Leave room for title, status, help
-
-	// Calculate slice of stations to show
-	start := 0
-	if a.cursor >= listHeight-1 && listHeight > 0 {
-		start = a.cursor - listHeight + 1
+	leftWidth := 26
+	rightWidth := 58
+	if a.width > 0 {
+		innerWidth := max(48, a.width-2)
+		leftWidth = max(24, min(32, innerWidth/3))
+		rightWidth = max(36, innerWidth-leftWidth-2)
 	}
-	end := min(start+listHeight, len(a.stations))
+	contentHeight := max(8, a.height-3)
 
-	// Build station list display
+	provincePanel := a.renderProvincePanel(leftWidth, contentHeight)
+	stationPanel := a.renderStationPanel(rightWidth, contentHeight)
+
+	// 使用更简单的边框拼接方式，不再使用 Panel 的整体边框
+	borderStyle := lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, true, false, false).BorderForeground(lipgloss.Color("238"))
+	leftWithBorder := borderStyle.Render(provincePanel)
+
+	mainContent := lipgloss.JoinHorizontal(lipgloss.Top, leftWithBorder, stationPanel)
+	b.WriteString(mainContent)
+
+	statusText := "未播放"
+	if a.player.IsPlaying() && a.player.Station != nil {
+		statusText = fmt.Sprintf("播放中：%s", a.player.Station.Title)
+		if a.player.Station.Subtitle != "" {
+			statusText = fmt.Sprintf("%s / %s", statusText, a.player.Station.Subtitle)
+		}
+	} else if a.player.GetState() == 1 {
+		statusText = "已暂停"
+	}
+
+	statusWidth := leftWidth + rightWidth + 2
+	helpContent := fmt.Sprintf(
+		"状态：%s | 省份：%s | 电台：%d | W/S 选台 | A/D 切省 | Enter/Space 播放 | X 停止 | R 刷新 | Q 退出",
+		statusText,
+		a.currentProvinceName(),
+		len(a.stations),
+	)
+	help := a.styles.Help.Width(statusWidth).MaxWidth(statusWidth).Render(truncateRunes(helpContent, max(10, statusWidth)))
+	b.WriteString("\n" + help)
+
+	return b.String()
+}
+
+func (a *App) renderProvincePanel(width, height int) string {
+	var lines []string
+	title := lipgloss.NewStyle().Width(width - 4).Render(a.styles.PanelTitle.Render("省份"))
+	separator := lipgloss.NewStyle().Foreground(lipgloss.Color("238")).Width(width - 4).Render(strings.Repeat("─", max(1, width-4)))
+	lines = append(lines, title, separator)
+
+	visibleHeight := max(1, height-5)
+	start, end := windowRange(len(a.provinces), visibleHeight, a.provinceCursor)
+
+	for i := start; i < end; i++ {
+		province := a.provinces[i]
+		line := fmt.Sprintf("  %s", province.ProvinceName)
+		if i == a.provinceCursor {
+			line = a.styles.ProvinceSelected.Width(width - 4).Render("▶ " + province.ProvinceName)
+		} else {
+			line = a.styles.Province.Width(width - 4).Render(line)
+		}
+		lines = append(lines, line)
+	}
+
+	for len(lines) < visibleHeight+2 {
+		lines = append(lines, "")
+	}
+
+	content := strings.Join(lines, "\n")
+	return a.styles.Panel.Width(width).Height(height).Render(content)
+}
+
+func (a *App) renderStationPanel(width, height int) string {
+	var lines []string
+	title := lipgloss.NewStyle().Width(width - 4).Render(a.styles.PanelTitle.Render("电台列表"))
+	separator := lipgloss.NewStyle().Foreground(lipgloss.Color("238")).Width(width - 4).Render(strings.Repeat("─", max(1, width-4)))
+	lines = append(lines, title, separator)
+
+	if len(a.stations) == 0 {
+		emptyText := "当前省份暂无电台"
+		if a.inlineLoading {
+			emptyText = "正在切换省份..."
+		}
+		lines = append(lines, a.styles.Muted.Width(width-4).Render(emptyText))
+		content := strings.Join(lines, "\n")
+		return a.styles.Panel.Width(width).Height(height).Render(content)
+	}
+
+	visibleHeight := max(1, height-5)
+	start, end := windowRange(len(a.stations), visibleHeight, a.cursor)
+
 	for i := start; i < end; i++ {
 		station := a.stations[i]
-		var line string
-
-		// Add playback indicator if playing
-		indicator := " "
+		indicator := "  "
 		if a.player.IsPlaying() && a.player.Station != nil && a.player.Station.ContentID == station.ContentID {
-			indicator = "▶"
+			indicator = "▶ "
 		}
 
+		title := indicator + station.Title
 		if i == a.cursor {
-			line = a.styles.Selected.Render(fmt.Sprintf("%s %s", indicator, station.Title))
+			lines = append(lines, a.styles.Selected.Width(width-4).Render(title))
+			if station.Subtitle != "" {
+				lines = append(lines, a.styles.Subtitle.Width(width-4).Render("  "+station.Subtitle))
+			}
 		} else {
-			line = a.styles.Normal.Render(fmt.Sprintf("  %s", station.Title))
+			lines = append(lines, a.styles.Normal.Width(width-4).Render(title))
 		}
-
-		// Add subtitle if visible
-		if i == a.cursor && station.Subtitle != "" {
-			subtitleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Render
-			line += "\n  " + subtitleStyle(station.Subtitle)
-		}
-
-		b.WriteString(line + "\n")
 	}
 
-	// Status bar
-	statusText := "Stopped"
-	if a.player.IsPlaying() && a.player.Station != nil {
-		statusText = fmt.Sprintf("Playing: %s | %s", a.player.Station.Title, a.player.Station.Subtitle)
-	} else if a.player.GetState() == 1 { // Paused
-		statusText = "Paused"
+	for len(lines) < visibleHeight+2 {
+		lines = append(lines, "")
 	}
 
-	statusBar := a.styles.Status.Render(fmt.Sprintf(" Status: %s ", statusText))
-	b.WriteString("\n" + statusBar + "\n")
-
-	// Help
-	help := a.styles.Help.Render(" ↑↓ Navigate | Space/Enter Play/Stop | R Refresh | C Categories | P Provinces | Q Quit ")
-	b.WriteString(help + "\n")
-
-	// Station count
-	count := lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Render(fmt.Sprintf(" Total stations: %d ", len(a.stations)))
-	b.WriteString("\n" + count)
-
-	return b.String()
+	content := strings.Join(lines, "\n")
+	if a.inlineLoading {
+		content += "\n" + a.styles.Muted.Width(width-4).Render("正在切换省份...")
+	}
+	return a.styles.Panel.Width(width).Height(height).Render(content)
 }
 
-// renderCategorySelection renders the category selection interface
-func (a *App) renderCategorySelection() string {
-	var b strings.Builder
-
-	// Title
-	title := a.styles.Title.Render("📻 Select Category")
-	b.WriteString(title + "\n\n")
-
-	// Category list
-	for i, category := range a.categories {
-		var line string
-		if i == a.cursor {
-			line = a.styles.CategorySelected.Render(fmt.Sprintf("▶ %s", category.CategoryName))
-		} else {
-			line = a.styles.Category.Render(fmt.Sprintf("  %s", category.CategoryName))
-		}
-		b.WriteString(line + "\n")
+func (a *App) currentProvinceName() string {
+	if len(a.provinces) == 0 || a.provinceCursor >= len(a.provinces) {
+		return "全部"
 	}
-
-	// Help
-	help := a.styles.Help.Render(" ↑↓ Navigate | Enter Select | Escape Cancel | Q Quit ")
-	b.WriteString("\n" + help)
-
-	return b.String()
+	return a.provinces[a.provinceCursor].ProvinceName
 }
 
-// renderProvinceSelection renders the province selection interface
-func (a *App) renderProvinceSelection() string {
-	var b strings.Builder
-
-	// Title
-	title := a.styles.Title.Render("📻 Select Province")
-	b.WriteString(title + "\n\n")
-
-	// Province list
-	for i, province := range a.provinces {
-		var line string
-		if i == a.cursor {
-			line = a.styles.CategorySelected.Render(fmt.Sprintf("▶ %s", province.ProvinceName))
-		} else {
-			line = a.styles.Category.Render(fmt.Sprintf("  %s", province.ProvinceName))
-		}
-		b.WriteString(line + "\n")
+func windowRange(total, visible, cursor int) (int, int) {
+	if total <= 0 || visible <= 0 {
+		return 0, 0
+	}
+	if total <= visible {
+		return 0, total
 	}
 
-	// Help
-	help := a.styles.Help.Render(" ↑↓ Navigate | Enter Select | Escape Cancel | Q Quit ")
-	b.WriteString("\n" + help)
+	start := cursor - visible/2
+	if start < 0 {
+		start = 0
+	}
+	end := start + visible
+	if end > total {
+		end = total
+		start = end - visible
+	}
+	return start, end
+}
 
-	return b.String()
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func truncateRunes(s string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+
+	runes := []rune(s)
+	if len(runes) <= limit {
+		return s
+	}
+	if limit <= 1 {
+		return string(runes[:limit])
+	}
+	return string(runes[:limit-1]) + "…"
 }

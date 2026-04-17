@@ -8,7 +8,6 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	DefaultCategory  string `json:"default_category"`
 	DefaultProvince  string `json:"default_province"`
 	UseHighQuality   bool   `json:"use_high_quality"`
 	AutoRefresh      bool   `json:"auto_refresh"`
@@ -21,7 +20,6 @@ type Config struct {
 // DefaultConfig returns a default configuration
 func DefaultConfig() *Config {
 	return &Config{
-		DefaultCategory:  "0",
 		DefaultProvince:  "0",
 		UseHighQuality:   true,
 		AutoRefresh:      false,

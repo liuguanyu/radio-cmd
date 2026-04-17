@@ -9,21 +9,14 @@ import (
 )
 
 const (
-	BaseURL         = "https://ytmsout.radio.cn"
-	StationListPath = "/web/appBroadcast/list"
-	CategoryListPath = "/web/appCategory/list/all"
+	BaseURL          = "https://ytmsout.radio.cn"
+	StationListPath  = "/web/appBroadcast/list"
 	ProvinceListPath = "/web/appProvince/list/all"
 )
 
-// Category represents a radio station category
-type Category struct {
-	ID           string `json:"id"`
-	CategoryName string `json:"categoryName"`
-}
-
 // Province represents a province for regional stations
 type Province struct {
-	Code        int    `json:"provinceCode"`
+	Code         int    `json:"provinceCode"`
 	ProvinceName string `json:"provinceName"`
 }
 
@@ -75,32 +68,6 @@ func (c *Client) GetStationsByFilter(categoryID, provinceCode string) ([]Station
 	}
 
 	return apiResp.Data, nil
-}
-
-// GetCategories fetches the list of station categories
-func (c *Client) GetCategories() ([]Category, error) {
-	url := fmt.Sprintf("%s%s", c.baseURL, CategoryListPath)
-
-	resp, err := c.httpClient.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch categories: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	var result struct {
-		Code int        `json:"code"`
-		Data []Category `json:"data"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	return result.Data, nil
 }
 
 // GetProvinces fetches the list of provinces
