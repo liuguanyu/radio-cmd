@@ -74,7 +74,7 @@ func NewStyles() *Styles {
 			Padding(0, 1),
 
 		Panel: lipgloss.NewStyle().
-			Padding(0, 1),
+			Padding(0),
 
 		PanelTitle: lipgloss.NewStyle().
 			Bold(true).
@@ -326,21 +326,19 @@ func (a *App) renderMainUI() string {
 
 	leftWidth := 26
 	rightWidth := 58
+	gapWidth := 2
 	if a.width > 0 {
 		innerWidth := max(48, a.width-2)
 		leftWidth = max(24, min(32, innerWidth/3))
-		rightWidth = max(36, innerWidth-leftWidth-2)
+		rightWidth = max(36, innerWidth-leftWidth-gapWidth)
 	}
 	contentHeight := max(8, a.height-3)
 
 	provincePanel := a.renderProvincePanel(leftWidth, contentHeight)
 	stationPanel := a.renderStationPanel(rightWidth, contentHeight)
+	centerGap := lipgloss.NewStyle().Width(gapWidth).Height(contentHeight).Render("")
 
-	// 使用更简单的边框拼接方式，不再使用 Panel 的整体边框
-	borderStyle := lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, true, false, false).BorderForeground(lipgloss.Color("238"))
-	leftWithBorder := borderStyle.Render(provincePanel)
-
-	mainContent := lipgloss.JoinHorizontal(lipgloss.Top, leftWithBorder, stationPanel)
+	mainContent := lipgloss.JoinHorizontal(lipgloss.Top, provincePanel, centerGap, stationPanel)
 	b.WriteString(mainContent)
 
 	statusText := "未播放"
@@ -353,7 +351,7 @@ func (a *App) renderMainUI() string {
 		statusText = "已暂停"
 	}
 
-	statusWidth := leftWidth + rightWidth + 2
+	statusWidth := leftWidth + gapWidth + rightWidth
 	helpContent := fmt.Sprintf(
 		"状态：%s | 省份：%s | 电台：%d | W/S 选台 | A/D 切省 | Enter/Space 播放 | X 停止 | R 刷新 | Q 退出",
 		statusText,
@@ -367,47 +365,57 @@ func (a *App) renderMainUI() string {
 }
 
 func (a *App) renderProvincePanel(width, height int) string {
+	// 所有行统一用 rowStyle，宽度固定为 width，无额外 padding
+	rowStyle := lipgloss.NewStyle().Width(width)
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("81")).Width(width)
+	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("238")).Width(width)
+	selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("63")).Width(width)
+	normalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Width(width)
+
 	var lines []string
-	title := lipgloss.NewStyle().Width(width - 4).Render(a.styles.PanelTitle.Render("省份"))
-	separator := lipgloss.NewStyle().Foreground(lipgloss.Color("238")).Width(width - 4).Render(strings.Repeat("─", max(1, width-4)))
-	lines = append(lines, title, separator)
+	lines = append(lines, titleStyle.Render("省份"))
+	lines = append(lines, sepStyle.Render(strings.Repeat("─", max(1, width))))
 
 	visibleHeight := max(1, height-5)
 	start, end := windowRange(len(a.provinces), visibleHeight, a.provinceCursor)
 
 	for i := start; i < end; i++ {
 		province := a.provinces[i]
-		line := fmt.Sprintf("  %s", province.ProvinceName)
 		if i == a.provinceCursor {
-			line = a.styles.ProvinceSelected.Width(width - 4).Render("▶ " + province.ProvinceName)
+			lines = append(lines, selectedStyle.Render("▶ "+province.ProvinceName))
 		} else {
-			line = a.styles.Province.Width(width - 4).Render(line)
+			lines = append(lines, normalStyle.Render("  "+province.ProvinceName))
 		}
-		lines = append(lines, line)
 	}
 
 	for len(lines) < visibleHeight+2 {
-		lines = append(lines, "")
+		lines = append(lines, rowStyle.Render(""))
 	}
 
-	content := strings.Join(lines, "\n")
-	return a.styles.Panel.Width(width).Height(height).Render(content)
+	return strings.Join(lines, "\n")
 }
 
 func (a *App) renderStationPanel(width, height int) string {
+	// 所有行统一用 rowStyle，宽度固定为 width，无额外 padding
+	rowStyle := lipgloss.NewStyle().Width(width)
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("81")).Width(width)
+	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("238")).Width(width)
+	selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("63")).Width(width)
+	normalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Width(width)
+	subtitleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Width(width)
+	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Width(width)
+
 	var lines []string
-	title := lipgloss.NewStyle().Width(width - 4).Render(a.styles.PanelTitle.Render("电台列表"))
-	separator := lipgloss.NewStyle().Foreground(lipgloss.Color("238")).Width(width - 4).Render(strings.Repeat("─", max(1, width-4)))
-	lines = append(lines, title, separator)
+	lines = append(lines, titleStyle.Render("电台列表"))
+	lines = append(lines, sepStyle.Render(strings.Repeat("─", max(1, width))))
 
 	if len(a.stations) == 0 {
 		emptyText := "当前省份暂无电台"
 		if a.inlineLoading {
 			emptyText = "正在切换省份..."
 		}
-		lines = append(lines, a.styles.Muted.Width(width-4).Render(emptyText))
-		content := strings.Join(lines, "\n")
-		return a.styles.Panel.Width(width).Height(height).Render(content)
+		lines = append(lines, mutedStyle.Render(emptyText))
+		return strings.Join(lines, "\n")
 	}
 
 	visibleHeight := max(1, height-5)
@@ -415,31 +423,25 @@ func (a *App) renderStationPanel(width, height int) string {
 
 	for i := start; i < end; i++ {
 		station := a.stations[i]
-		indicator := "  "
-		if a.player.IsPlaying() && a.player.Station != nil && a.player.Station.ContentID == station.ContentID {
-			indicator = "▶ "
-		}
-
-		title := indicator + station.Title
+		stationTitle := "  " + station.Title
 		if i == a.cursor {
-			lines = append(lines, a.styles.Selected.Width(width-4).Render(title))
+			lines = append(lines, selectedStyle.Render(stationTitle))
 			if station.Subtitle != "" {
-				lines = append(lines, a.styles.Subtitle.Width(width-4).Render("  "+station.Subtitle))
+				lines = append(lines, subtitleStyle.Render("  "+station.Subtitle))
 			}
 		} else {
-			lines = append(lines, a.styles.Normal.Width(width-4).Render(title))
+			lines = append(lines, normalStyle.Render(stationTitle))
 		}
 	}
 
 	for len(lines) < visibleHeight+2 {
-		lines = append(lines, "")
+		lines = append(lines, rowStyle.Render(""))
 	}
 
-	content := strings.Join(lines, "\n")
 	if a.inlineLoading {
-		content += "\n" + a.styles.Muted.Width(width-4).Render("正在切换省份...")
+		lines = append(lines, mutedStyle.Render("正在切换省份..."))
 	}
-	return a.styles.Panel.Width(width).Height(height).Render(content)
+	return strings.Join(lines, "\n")
 }
 
 func (a *App) currentProvinceName() string {
