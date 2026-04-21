@@ -6,15 +6,28 @@ import (
 	"path/filepath"
 )
 
+// Schedule represents a scheduled playback
+type Schedule struct {
+	ID          string `json:"id"`
+	StationID   string `json:"station_id"`
+	StationName string `json:"station_name"`
+	// Time format: "15:04" for daily, "2006-01-02T15:04" for one-time
+	PlayTime    string `json:"play_time"`
+	Recurring   bool   `json:"recurring"` // true for daily, false for one-time
+	Enabled     bool   `json:"enabled"`
+	CreatedAt   int64  `json:"created_at"`
+}
+
 // Config represents the application configuration
 type Config struct {
-	DefaultProvince  string `json:"default_province"`
-	UseHighQuality   bool   `json:"use_high_quality"`
-	AutoRefresh      bool   `json:"auto_refresh"`
-	RefreshInterval  int    `json:"refresh_interval_minutes"` // 0 = disabled
-	MaxFailedRetries int    `json:"max_failed_retries"`
-	CacheStations    bool   `json:"cache_stations"`
-	CacheTTLMinutes  int    `json:"cache_ttl_minutes"`
+	DefaultProvince  string     `json:"default_province"`
+	UseHighQuality   bool       `json:"use_high_quality"`
+	AutoRefresh      bool       `json:"auto_refresh"`
+	RefreshInterval  int        `json:"refresh_interval_minutes"` // 0 = disabled
+	MaxFailedRetries int        `json:"max_failed_retries"`
+	CacheStations    bool       `json:"cache_stations"`
+	CacheTTLMinutes  int        `json:"cache_ttl_minutes"`
+	Schedules        []Schedule `json:"schedules"`
 }
 
 // DefaultConfig returns a default configuration
@@ -27,6 +40,7 @@ func DefaultConfig() *Config {
 		MaxFailedRetries: 3,
 		CacheStations:    true,
 		CacheTTLMinutes:  60,
+		Schedules:        []Schedule{},
 	}
 }
 

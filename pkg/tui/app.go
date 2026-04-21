@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/google/uuid"
 	"github.com/liuguanyu/radio-cmd/internal/config"
 	"github.com/liuguanyu/radio-cmd/pkg/radio"
 )
@@ -88,6 +90,15 @@ func NewStyles() *Styles {
 	}
 }
 
+// ViewMode represents the current view mode of the application
+type ViewMode int
+
+const (
+	MainView ViewMode = iota
+	ScheduleListView
+	ScheduleFormView
+)
+
 // App represents the main TUI application
 type App struct {
 	client        *radio.Client
@@ -107,6 +118,16 @@ type App struct {
 	provinceFilter string
 	provinces      []radio.Province
 	provinceCursor int
+
+	// Schedule related fields
+	currentView      ViewMode
+	schedules        []config.Schedule
+	scheduleCursor   int
+	formSchedule     config.Schedule
+	timeInput        string
+	selectedStation  *radio.Station
+	stationSelecting bool
+	recurring        bool
 }
 
 // NewApp creates a new TUI application
@@ -120,9 +141,12 @@ func NewApp() *App {
 		client:         radio.NewClient(),
 		player:         radio.NewPlayer(),
 		cfg:            cfg,
-		loading:        true,
 		styles:         NewStyles(),
 		provinceFilter: cfg.DefaultProvince,
+		currentView:    MainView,
+		schedules:      cfg.Schedules,
+		timeInput:      time.Now().Format("15:04"),
+		recurring:      true,
 	}
 }
 
@@ -175,7 +199,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.lastError = fmt.Sprintf("Failed to fetch provinces: %v", msg.err)
 			return a, nil
 		}
-		a.provinces = append([]radio.Province{{Code: 0, ProvinceName: "全部"}}, msg.provinces...)
+		a.provinces = msg.provinces
 		a.syncProvinceCursor()
 		return a, nil
 
@@ -190,15 +214,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View implements tea.Model
 func (a *App) View() string {
-	if a.loading && len(a.stations) == 0 {
-		return a.renderLoading()
-	}
-
 	if a.err != nil {
 		return a.renderError()
 	}
 
-	return a.renderMainUI()
+	switch a.currentView {
+	case MainView:
+		return a.renderMainUI()
+	case ScheduleListView:
+		return a.renderScheduleList()
+	case ScheduleFormView:
+		return a.renderScheduleForm()
+	default:
+		return a.renderMainUI()
+	}
 }
 
 // Messages
@@ -225,8 +254,25 @@ func (a *App) fetchProvinces() tea.Msg {
 
 // Key handling
 func (a *App) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch a.currentView {
+	case MainView:
+		return a.handleMainViewKeys(msg)
+	case ScheduleListView:
+		return a.handleScheduleListKeys(msg)
+	case ScheduleFormView:
+		return a.handleScheduleFormKeys(msg)
+	default:
+		return a.handleMainViewKeys(msg)
+	}
+}
+
+func (a *App) handleMainViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "ctrl+c", "q":
+	case "ctrl+c":
+		a.player.Stop()
+		return a, tea.Quit
+
+	case "q":
 		a.player.Stop()
 		return a, tea.Quit
 
@@ -267,6 +313,120 @@ func (a *App) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		a.loading = true
 		return a, a.fetchStations
+
+	case "s":
+		// Switch to schedule list view
+		a.currentView = ScheduleListView
+		return a, nil
+	}
+
+	return a, nil
+}
+
+func (a *App) handleScheduleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		a.player.Stop()
+		return a, tea.Quit
+
+	case "q":
+		// Return to main view
+		a.currentView = MainView
+		return a, nil
+
+	case "up", "k":
+		if len(a.schedules) > 0 && a.scheduleCursor > 0 {
+			a.scheduleCursor--
+		}
+
+	case "down", "j":
+		if len(a.schedules) > 0 && a.scheduleCursor < len(a.schedules)-1 {
+			a.scheduleCursor++
+		}
+
+	case "enter":
+		if len(a.schedules) > 0 {
+			// Edit selected schedule
+			a.formSchedule = a.schedules[a.scheduleCursor]
+			a.timeInput = a.formSchedule.PlayTime
+			a.recurring = a.formSchedule.Recurring
+			a.formSchedule.Enabled = true
+			a.currentView = ScheduleFormView
+			return a, nil
+		}
+
+	case "n", "N":
+		// Create new schedule
+		a.formSchedule = config.Schedule{
+			ID:        uuid.New().String(),
+			CreatedAt: time.Now().Unix(),
+			Enabled:   true,
+		}
+		a.timeInput = time.Now().Format("15:04")
+		a.recurring = true
+		a.selectedStation = nil
+		a.currentView = ScheduleFormView
+		return a, nil
+
+	case "del", "delete":
+		if len(a.schedules) > 0 {
+			// Remove schedule
+			a.schedules = append(a.schedules[:a.scheduleCursor], a.schedules[a.scheduleCursor+1:]...)
+			if a.scheduleCursor >= len(a.schedules) && len(a.schedules) > 0 {
+				a.scheduleCursor = len(a.schedules) - 1
+			}
+			// Update config
+			a.cfg.Schedules = a.schedules
+			a.saveConfig()
+		}
+	}
+
+	return a, nil
+}
+
+func (a *App) handleScheduleFormKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c", "q":
+		a.player.Stop()
+		return a, tea.Quit
+
+	case "ctrl+s":
+		// Save schedule
+		if a.selectedStation != nil {
+			a.formSchedule.StationID = a.selectedStation.ContentID
+			a.formSchedule.StationName = a.selectedStation.Title
+			a.formSchedule.PlayTime = a.timeInput
+			a.formSchedule.Recurring = a.recurring
+
+			// Check if it's a new schedule or editing existing
+			if a.formSchedule.ID == "" {
+				// New schedule
+				a.formSchedule.ID = uuid.New().String()
+				a.formSchedule.CreatedAt = time.Now().Unix()
+				a.schedules = append(a.schedules, a.formSchedule)
+			} else {
+				// Update existing schedule
+				for i, s := range a.schedules {
+					if s.ID == a.formSchedule.ID {
+						a.schedules[i] = a.formSchedule
+						break
+					}
+				}
+			}
+
+			// Update config
+			a.cfg.Schedules = a.schedules
+			a.saveConfig()
+
+			// Return to schedule list
+			a.currentView = ScheduleListView
+		}
+		return a, nil
+
+	case "esc":
+		// Return to schedule list without saving
+		a.currentView = ScheduleListView
+		return a, nil
 	}
 
 	return a, nil
@@ -309,9 +469,6 @@ func (a *App) syncProvinceCursor() {
 }
 
 // Rendering functions
-func (a *App) renderLoading() string {
-	return a.styles.Loading.Render("📻 Loading radio stations...")
-}
 
 func (a *App) renderError() string {
 	errorMsg := fmt.Sprintf("Error: %v\n\nPress 'q' to quit", a.lastError)
@@ -319,6 +476,110 @@ func (a *App) renderError() string {
 		errorMsg = fmt.Sprintf("Error: %v\n\nPress 'q' to quit", a.err)
 	}
 	return a.styles.Error.Render(errorMsg)
+}
+
+func (a *App) renderScheduleList() string {
+	var b strings.Builder
+
+	// Header
+	b.WriteString(a.styles.Title.Render("播放计划列表") + "\n\n")
+
+	if len(a.schedules) == 0 {
+		b.WriteString(a.styles.Muted.Render("暂无播放计划") + "\n\n")
+	} else {
+		// Column headers
+		headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("81"))
+		b.WriteString(headerStyle.Render(fmt.Sprintf("%-20s %-20s %-10s %-10s", "时间", "电台", "类型", "状态")) + "\n")
+		b.WriteString(strings.Repeat("─", 70) + "\n")
+
+		// Schedule list
+		for i, schedule := range a.schedules {
+			var line string
+			if schedule.Recurring {
+				line = fmt.Sprintf("%-20s %-20s %-10s ", schedule.PlayTime, schedule.StationName, "每日")
+			} else {
+				line = fmt.Sprintf("%-20s %-20s %-10s ", schedule.PlayTime, schedule.StationName, "单次")
+			}
+
+			if schedule.Enabled {
+				line += "启用"
+			} else {
+				line += "禁用"
+			}
+
+			if i == a.scheduleCursor {
+				b.WriteString(a.styles.Selected.Render(line) + "\n")
+			} else {
+				b.WriteString(a.styles.Normal.Render(line) + "\n")
+			}
+		}
+	}
+
+	// Help text
+	helpText := "↑/↓ 选择 | Enter 编辑 | Del 删除 | N 新建 | Q 返回主界面"
+	b.WriteString("\n" + a.styles.Help.Render(helpText))
+
+	return b.String()
+}
+
+func (a *App) renderScheduleForm() string {
+	var b strings.Builder
+
+	// Header
+	if a.formSchedule.ID == "" {
+		b.WriteString(a.styles.Title.Render("新建播放计划") + "\n\n")
+	} else {
+		b.WriteString(a.styles.Title.Render("编辑播放计划") + "\n\n")
+	}
+
+	// Form fields
+	fields := []struct {
+		label string
+		value string
+	}{
+		{"时间 (HH:MM)", a.timeInput},
+		{"电台", func() string {
+			if a.selectedStation != nil {
+				return a.selectedStation.Title
+			}
+			return "点击选择电台"
+		}()},
+		{"类型", func() string {
+			if a.recurring {
+				return "每日重复"
+			}
+			return "单次播放"
+		}()},
+		{"状态", func() string {
+			if a.formSchedule.Enabled {
+				return "启用"
+			}
+			return "禁用"
+		}()},
+	}
+
+	for i, field := range fields {
+		labelStyle := lipgloss.NewStyle().Width(15)
+		valueStyle := lipgloss.NewStyle()
+
+		if a.stationSelecting && i == 1 {
+			// Special handling for station selection
+			b.WriteString(labelStyle.Render(field.label+":") + " " + a.styles.Selected.Render(field.value) + "\n")
+		} else if !a.stationSelecting && i == 0 {
+			// Time input field
+			b.WriteString(labelStyle.Render(field.label+":") + " " + a.styles.Selected.Render(field.value) + "\n")
+		} else {
+			b.WriteString(labelStyle.Render(field.label+":") + " " + valueStyle.Render(field.value) + "\n")
+		}
+	}
+
+	b.WriteString("\n")
+
+	// Help text
+	helpText := "↑/↓ 切换字段 | Enter 选择/确认 | Esc 取消 | Ctrl+S 保存"
+	b.WriteString(a.styles.Help.Render(helpText))
+
+	return b.String()
 }
 
 func (a *App) renderMainUI() string {
@@ -353,7 +614,7 @@ func (a *App) renderMainUI() string {
 
 	statusWidth := leftWidth + gapWidth + rightWidth
 	helpContent := fmt.Sprintf(
-		"状态：%s | 省份：%s | 电台：%d | W/S 选台 | A/D 切省 | Enter/Space 播放 | X 停止 | R 刷新 | Q 退出",
+		"状态：%s | 省份：%s | 电台：%d | W/S 选台 | A/D 切省 | Enter/Space 播放 | X 停止 | R 刷新 | S 计划 | Q 退出",
 		statusText,
 		a.currentProvinceName(),
 		len(a.stations),
@@ -382,14 +643,14 @@ func (a *App) renderProvincePanel(width, height int) string {
 	for i := start; i < end; i++ {
 		province := a.provinces[i]
 		if i == a.provinceCursor {
-			lines = append(lines, selectedStyle.Render("▶ "+province.ProvinceName))
+			lines = append(lines, selectedStyle.Render("> "+province.ProvinceName))
 		} else {
 			lines = append(lines, normalStyle.Render("  "+province.ProvinceName))
 		}
 	}
 
 	for len(lines) < visibleHeight+2 {
-		lines = append(lines, rowStyle.Render(""))
+		lines = append(lines, rowStyle.Render(" "))
 	}
 
 	return strings.Join(lines, "\n")
@@ -405,6 +666,8 @@ func (a *App) renderStationPanel(width, height int) string {
 	subtitleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Width(width)
 	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Width(width)
 
+	visibleHeight := max(1, height-5)
+
 	var lines []string
 	lines = append(lines, titleStyle.Render("电台列表"))
 	lines = append(lines, sepStyle.Render(strings.Repeat("─", max(1, width))))
@@ -415,10 +678,14 @@ func (a *App) renderStationPanel(width, height int) string {
 			emptyText = "正在切换省份..."
 		}
 		lines = append(lines, mutedStyle.Render(emptyText))
+
+		// Ensure consistent height with province panel
+		for len(lines) < visibleHeight+2 {
+			lines = append(lines, rowStyle.Render(""))
+		}
+
 		return strings.Join(lines, "\n")
 	}
-
-	visibleHeight := max(1, height-5)
 	start, end := windowRange(len(a.stations), visibleHeight, a.cursor)
 
 	for i := start; i < end; i++ {
@@ -435,7 +702,7 @@ func (a *App) renderStationPanel(width, height int) string {
 	}
 
 	for len(lines) < visibleHeight+2 {
-		lines = append(lines, rowStyle.Render(""))
+		lines = append(lines, rowStyle.Render(" "))
 	}
 
 	if a.inlineLoading {
@@ -459,30 +726,19 @@ func windowRange(total, visible, cursor int) (int, int) {
 		return 0, total
 	}
 
-	start := cursor - visible/2
-	if start < 0 {
-		start = 0
+	start := max(0, cursor - visible/2)
+	end := min(total, start + visible)
+
+	// Adjust start if end was clamped
+	if end - start < visible {
+		start = max(0, end - visible)
 	}
-	end := start + visible
-	if end > total {
-		end = total
-		start = end - visible
-	}
+
 	return start, end
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
+func (a *App) saveConfig() error {
+	return config.SaveConfig(a.cfg)
 }
 
 func truncateRunes(s string, limit int) string {
