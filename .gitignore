@@ -56,6 +56,9 @@ wheels/
 ehthumbs.db
 Thumbs.db
 
+# Local runtime data
+.radio-cmd/
+
 # Logs
 *.log
 

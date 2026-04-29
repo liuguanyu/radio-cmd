@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -12,6 +14,27 @@ import (
 	"github.com/liuguanyu/radio-cmd/internal/config"
 	"github.com/liuguanyu/radio-cmd/pkg/radio"
 )
+
+func debugLog(msg string) {
+	home := os.Getenv("HOME")
+	if home == "" {
+		home = os.Getenv("USERPROFILE")
+	}
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+	if home == "" {
+		home = "."
+	}
+	dir := filepath.Join(home, ".radio-cmd")
+	os.MkdirAll(dir, 0755)
+	f, err := os.OpenFile(filepath.Join(dir, "app.debug.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.WriteString(time.Now().Format("2006-01-02 15:04:05") + " " + msg + "\n")
+}
 
 // Styles defines all the UI styles for the application
 type Styles struct {
@@ -118,6 +141,7 @@ type App struct {
 	provinceFilter string
 	provinces      []radio.Province
 	provinceCursor int
+	initialLoading bool
 
 	// Schedule related fields
 	currentView      ViewMode
@@ -125,9 +149,20 @@ type App struct {
 	scheduleCursor   int
 	formSchedule     config.Schedule
 	timeInput        string
-	selectedStation  *radio.Station
-	stationSelecting bool
-	recurring        bool
+	selectedStationID string
+	scheduler        *Scheduler
+
+	// Schedule form: province/station selection state
+	formProvinceCursor   int
+	formStationCursor    int
+	formFieldCursor      int // 0=time, 1=province, 2=station, 3=enabled
+	formProvinces        []radio.Province
+	formStations         []radio.Station
+	formStationsLoading  bool
+
+	// Channel for scheduler to notify about station switches
+	stationSwitchedCh          chan StationSwitchedInfo
+	schedulerTargetStationID   string  // used by scheduler to select station after province switch
 }
 
 // NewApp creates a new TUI application
@@ -137,16 +172,26 @@ func NewApp() *App {
 		cfg = config.DefaultConfig()
 	}
 
+	client := radio.NewClient()
+	player := radio.NewPlayer()
+	stationSwitchedCh := make(chan StationSwitchedInfo, 1)
+	scheduler := NewScheduler(client, player, cfg, stationSwitchedCh)
+	scheduler.Start()
+
 	return &App{
-		client:         radio.NewClient(),
-		player:         radio.NewPlayer(),
-		cfg:            cfg,
-		styles:         NewStyles(),
-		provinceFilter: cfg.DefaultProvince,
-		currentView:    MainView,
-		schedules:      cfg.Schedules,
-		timeInput:      time.Now().Format("15:04"),
-		recurring:      true,
+		client:           client,
+		player:           player,
+		cfg:              cfg,
+		styles:           NewStyles(),
+		provinceFilter:   cfg.DefaultProvince,
+		provinceCursor:   0,
+		loading:          true,
+		initialLoading:   true,
+		currentView:      MainView,
+		schedules:        cfg.Schedules,
+		timeInput:        time.Now().Format("15:04"),
+		scheduler:        scheduler,
+		stationSwitchedCh: stationSwitchedCh,
 	}
 }
 
@@ -171,6 +216,13 @@ func (a *App) Init() tea.Cmd {
 
 // Update implements tea.Model
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Non-blocking receive from scheduler station switch notifications
+	select {
+	case info := <-a.stationSwitchedCh:
+		return a.handleStationSwitched(info)
+	default:
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		return a.handleKeyPress(msg)
@@ -178,6 +230,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case stationsFetchedMsg:
 		a.loading = false
 		a.inlineLoading = false
+		a.initialLoading = false
+		// If the response doesn't match the currently selected province, discard it
+		// The old stations (from the correct province) remain displayed
+		if msg.provinceFilter != a.provinceFilter {
+			return a, nil
+		}
 		if msg.err != nil {
 			a.err = msg.err
 			a.lastError = fmt.Sprintf("Failed to fetch stations: %v", msg.err)
@@ -186,7 +244,18 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.err = nil
 		a.stations = msg.stations
 		a.needsRefresh = false
-		if len(a.stations) == 0 {
+
+		// If a target station was set (e.g., from scheduler), select it
+		if a.schedulerTargetStationID != "" {
+			for i, st := range a.stations {
+				if st.ContentID == a.schedulerTargetStationID {
+					a.cursor = i
+					break
+				}
+			}
+			// Clear after use
+			a.schedulerTargetStationID = ""
+		} else if len(a.stations) == 0 {
 			a.cursor = 0
 		} else if a.cursor >= len(a.stations) {
 			a.cursor = len(a.stations) - 1
@@ -200,12 +269,47 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		a.provinces = msg.provinces
+		prevCursor := a.provinceCursor
+		prevFilter := a.provinceFilter
 		a.syncProvinceCursor()
+		a.initialLoading = false
+
+		// Check if we need to reload stations for the correct province
+		// This handles the case where DefaultProvince is "0" (all) but we want the first province
+		if a.provinceCursor != prevCursor || a.provinceFilter != prevFilter {
+			a.cursor = 0
+			a.stations = nil
+			return a, a.applyProvinceSelection()
+		}
 		return a, nil
 
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
+		return a, nil
+
+	case formStationsFetchedMsg:
+		a.formStationsLoading = false
+		if msg.err != nil {
+			a.formStations = nil
+		} else {
+			a.formStations = msg.stations
+			a.formStationCursor = 0
+			// Only auto-select first station if selectedStationID is empty (NEW case)
+			// For EDIT case, selectedStationID is pre-set to the schedule's station
+			if len(a.formStations) > 0 && a.selectedStationID == "" {
+				a.selectedStationID = a.formStations[0].ContentID
+			}
+			// Sync formStationCursor to match selectedStationID
+			if a.selectedStationID != "" {
+				for i, st := range a.formStations {
+					if st.ContentID == a.selectedStationID {
+						a.formStationCursor = i
+						break
+					}
+				}
+			}
+		}
 		return a, nil
 	}
 
@@ -232,8 +336,9 @@ func (a *App) View() string {
 
 // Messages
 type stationsFetchedMsg struct {
-	stations []radio.Station
-	err      error
+	stations       []radio.Station
+	err            error
+	provinceFilter string
 }
 
 type provincesFetchedMsg struct {
@@ -241,15 +346,33 @@ type provincesFetchedMsg struct {
 	err       error
 }
 
+type formStationsFetchedMsg struct {
+	stations []radio.Station
+	err      error
+}
+
 // Commands
 func (a *App) fetchStations() tea.Msg {
-	stations, err := a.client.GetStationsByFilter("0", a.provinceFilter)
-	return stationsFetchedMsg{stations: stations, err: err}
+	return a.fetchStationsWithFilter(a.provinceFilter)
+}
+
+func (a *App) fetchStationsWithFilter(provinceFilter string) tea.Cmd {
+	return func() tea.Msg {
+		stations, err := a.client.GetStationsByFilter("0", provinceFilter)
+		return stationsFetchedMsg{stations: stations, err: err, provinceFilter: provinceFilter}
+	}
 }
 
 func (a *App) fetchProvinces() tea.Msg {
 	provinces, err := a.client.GetProvinces()
 	return provincesFetchedMsg{provinces: provinces, err: err}
+}
+
+func (a *App) fetchStationsForFormProvince(provinceCode int) tea.Cmd {
+	return func() tea.Msg {
+		stations, err := a.client.GetStationsByFilter("0", strconv.Itoa(provinceCode))
+		return formStationsFetchedMsg{stations: stations, err: err}
+	}
 }
 
 // Key handling
@@ -346,27 +469,55 @@ func (a *App) handleScheduleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "enter":
 		if len(a.schedules) > 0 {
-			// Edit selected schedule
 			a.formSchedule = a.schedules[a.scheduleCursor]
-			a.timeInput = a.formSchedule.PlayTime
-			a.recurring = a.formSchedule.Recurring
-			a.formSchedule.Enabled = true
+			a.timeInput = a.formSchedule.Time
+			a.formFieldCursor = 0
+			a.formProvinceCursor = 0
+			a.formStationCursor = 0
+			a.formProvinces = append([]radio.Province{{Code: 0, ProvinceName: "国家台"}}, a.provinces...)
+			a.formStations = nil
+			a.formStationsLoading = false
+			a.selectedStationID = a.formSchedule.StationID // Pre-set so findSelectedStation works after stations load
+			a.lastError = ""
 			a.currentView = ScheduleFormView
-			return a, nil
+			// Load stations for the schedule's province
+			var cmd tea.Cmd
+			if a.formSchedule.ProvinceCode == 0 {
+				cmd = a.fetchStationsForFormProvince(0)
+			} else {
+				cmd = a.fetchStationsForFormProvince(a.formSchedule.ProvinceCode)
+				// Set province cursor to match
+				for i, p := range a.formProvinces {
+					if p.Code == a.formSchedule.ProvinceCode {
+						a.formProvinceCursor = i
+						break
+					}
+				}
+			}
+			return a, cmd
 		}
 
 	case "n", "N":
 		// Create new schedule
 		a.formSchedule = config.Schedule{
-			ID:        uuid.New().String(),
-			CreatedAt: time.Now().Unix(),
-			Enabled:   true,
+			ID:          uuid.New().String(),
+			CreatedAt:   time.Now().Unix(),
+			Enabled:     true,
+			ProvinceCode: 0,
+			Time:        time.Now().Format("15:04"),
 		}
-		a.timeInput = time.Now().Format("15:04")
-		a.recurring = true
-		a.selectedStation = nil
+		a.timeInput = a.formSchedule.Time
+		a.formFieldCursor = 0
+		a.formProvinceCursor = 0
+		a.formStationCursor = 0
+		a.formProvinces = append([]radio.Province{{Code: 0, ProvinceName: "国家台"}}, a.provinces...)
+		a.formStations = nil
+		a.formStationsLoading = false
+		a.selectedStationID = ""
+		a.lastError = ""
 		a.currentView = ScheduleFormView
-		return a, nil
+		// Preload stations for first province (国家台 = 0)
+		return a, a.fetchStationsForFormProvince(0)
 
 	case "del", "delete":
 		if len(a.schedules) > 0 {
@@ -375,9 +526,9 @@ func (a *App) handleScheduleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if a.scheduleCursor >= len(a.schedules) && len(a.schedules) > 0 {
 				a.scheduleCursor = len(a.schedules) - 1
 			}
-			// Update config
 			a.cfg.Schedules = a.schedules
 			a.saveConfig()
+			a.scheduler.UpdateConfig(a.cfg)
 		}
 	}
 
@@ -386,47 +537,126 @@ func (a *App) handleScheduleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (a *App) handleScheduleFormKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "ctrl+c", "q":
+	case "ctrl+c":
 		a.player.Stop()
 		return a, tea.Quit
 
-	case "ctrl+s":
-		// Save schedule
-		if a.selectedStation != nil {
-			a.formSchedule.StationID = a.selectedStation.ContentID
-			a.formSchedule.StationName = a.selectedStation.Title
-			a.formSchedule.PlayTime = a.timeInput
-			a.formSchedule.Recurring = a.recurring
-
-			// Check if it's a new schedule or editing existing
-			if a.formSchedule.ID == "" {
-				// New schedule
-				a.formSchedule.ID = uuid.New().String()
-				a.formSchedule.CreatedAt = time.Now().Unix()
-				a.schedules = append(a.schedules, a.formSchedule)
-			} else {
-				// Update existing schedule
-				for i, s := range a.schedules {
-					if s.ID == a.formSchedule.ID {
-						a.schedules[i] = a.formSchedule
-						break
-					}
-				}
-			}
-
-			// Update config
-			a.cfg.Schedules = a.schedules
-			a.saveConfig()
-
-			// Return to schedule list
-			a.currentView = ScheduleListView
+	case "ctrl+s", "ctrl+g":
+		if err := a.saveScheduleForm(); err != nil {
+			// keep lastError set, form will display it
 		}
 		return a, nil
 
 	case "esc":
-		// Return to schedule list without saving
 		a.currentView = ScheduleListView
 		return a, nil
+
+	case "tab":
+		a.formFieldCursor = (a.formFieldCursor + 1) % 4
+		return a, nil
+
+	case "up":
+		switch a.formFieldCursor {
+		case 0: // Time
+			a.adjustTime(-1)
+		case 1: // Province
+			if a.formProvinceCursor > 0 {
+				a.formProvinceCursor--
+			}
+		case 2: // Station
+			if a.formStationCursor > 0 {
+				a.formStationCursor--
+				if len(a.formStations) > 0 && a.formStationCursor < len(a.formStations) {
+					a.selectedStationID = a.formStations[a.formStationCursor].ContentID
+				}
+			}
+		case 3: // Enabled
+			a.formSchedule.Enabled = !a.formSchedule.Enabled
+		}
+
+	case "down":
+		switch a.formFieldCursor {
+		case 0: // Time
+			a.adjustTime(1)
+		case 1: // Province
+			if a.formProvinceCursor < len(a.formProvinces)-1 {
+				a.formProvinceCursor++
+			}
+		case 2: // Station
+			if a.formStationCursor < len(a.formStations)-1 {
+				a.formStationCursor++
+				if len(a.formStations) > 0 && a.formStationCursor < len(a.formStations) {
+					a.selectedStationID = a.formStations[a.formStationCursor].ContentID
+				}
+			}
+		case 3: // Enabled
+			a.formSchedule.Enabled = !a.formSchedule.Enabled
+		}
+
+	case "left":
+		switch a.formFieldCursor {
+		case 1: // Province
+			if a.formProvinceCursor > 0 {
+				a.formProvinceCursor--
+				a.formStationsLoading = true
+				a.selectedStationID = ""
+				return a, a.fetchStationsForFormProvince(a.formProvinceCode())
+			}
+		case 2: // Station
+			if a.formStationCursor > 0 {
+				a.formStationCursor--
+				if len(a.formStations) > a.formStationCursor {
+					a.selectedStationID = a.formStations[a.formStationCursor].ContentID
+				}
+			}
+		case 3: // Enabled
+			a.formSchedule.Enabled = !a.formSchedule.Enabled
+		}
+
+	case "right":
+		switch a.formFieldCursor {
+		case 1: // Province
+			if a.formProvinceCursor < len(a.formProvinces)-1 {
+				a.formProvinceCursor++
+				a.formStationsLoading = true
+				a.selectedStationID = ""
+				return a, a.fetchStationsForFormProvince(a.formProvinceCode())
+			}
+		case 2: // Station
+			if a.formStationCursor < len(a.formStations)-1 {
+				a.formStationCursor++
+				if len(a.formStations) > a.formStationCursor {
+					a.selectedStationID = a.formStations[a.formStationCursor].ContentID
+				}
+			}
+		case 3: // Enabled
+			a.formSchedule.Enabled = !a.formSchedule.Enabled
+		}
+
+	case "enter":
+		switch a.formFieldCursor {
+		case 0, 1, 3:
+			a.saveScheduleForm()
+			return a, nil
+		case 2: // Station: confirm selection and collapse list
+			if len(a.formStations) > 0 && a.formStationCursor < len(a.formStations) {
+				a.selectedStationID = a.formStations[a.formStationCursor].ContentID
+				a.formFieldCursor = (a.formFieldCursor + 1) % 4
+				return a, nil
+			}
+		}
+
+	case "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", ":":
+		if a.formFieldCursor == 0 {
+			if len(a.timeInput) < 5 {
+				a.timeInput += msg.String()
+			}
+		}
+
+	case "backspace":
+		if a.formFieldCursor == 0 && len(a.timeInput) > 0 {
+			a.timeInput = a.timeInput[:len(a.timeInput)-1]
+		}
 	}
 
 	return a, nil
@@ -438,13 +668,15 @@ func (a *App) applyProvinceSelection() tea.Cmd {
 	}
 
 	selected := a.provinces[a.provinceCursor]
-	a.provinceFilter = strconv.Itoa(selected.Code)
+	provinceFilter := strconv.Itoa(selected.Code)
+	a.provinceFilter = provinceFilter
 	a.cursor = 0
+	a.stations = nil
 	a.loading = true
 	a.inlineLoading = true
 	a.err = nil
 	a.lastError = ""
-	return a.fetchStations
+	return a.fetchStationsWithFilter(provinceFilter)
 }
 
 func (a *App) syncProvinceCursor() {
@@ -489,17 +721,12 @@ func (a *App) renderScheduleList() string {
 	} else {
 		// Column headers
 		headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("81"))
-		b.WriteString(headerStyle.Render(fmt.Sprintf("%-20s %-20s %-10s %-10s", "时间", "电台", "类型", "状态")) + "\n")
+		b.WriteString(headerStyle.Render(fmt.Sprintf("%-10s %-20s %-10s %-10s", "时间", "电台", "省份", "状态")) + "\n")
 		b.WriteString(strings.Repeat("─", 70) + "\n")
 
-		// Schedule list
 		for i, schedule := range a.schedules {
 			var line string
-			if schedule.Recurring {
-				line = fmt.Sprintf("%-20s %-20s %-10s ", schedule.PlayTime, schedule.StationName, "每日")
-			} else {
-				line = fmt.Sprintf("%-20s %-20s %-10s ", schedule.PlayTime, schedule.StationName, "单次")
-			}
+			line = fmt.Sprintf("%-10s %-20s %-10s ", schedule.Time, schedule.StationName, provinceName(schedule.ProvinceCode, a.provinces))
 
 			if schedule.Enabled {
 				line += "启用"
@@ -532,51 +759,73 @@ func (a *App) renderScheduleForm() string {
 		b.WriteString(a.styles.Title.Render("编辑播放计划") + "\n\n")
 	}
 
-	// Form fields
-	fields := []struct {
-		label string
-		value string
-	}{
-		{"时间 (HH:MM)", a.timeInput},
-		{"电台", func() string {
-			if a.selectedStation != nil {
-				return a.selectedStation.Title
-			}
-			return "点击选择电台"
-		}()},
-		{"类型", func() string {
-			if a.recurring {
-				return "每日重复"
-			}
-			return "单次播放"
-		}()},
-		{"状态", func() string {
-			if a.formSchedule.Enabled {
-				return "启用"
-			}
-			return "禁用"
-		}()},
+	labelStyle := lipgloss.NewStyle().Width(12).Bold(true)
+	activeValueStyle := a.styles.Selected
+	normalValueStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+
+	// Field 0: Time
+	timeValue := a.timeInput
+	if a.formFieldCursor == 0 {
+		b.WriteString(labelStyle.Render("时间:") + " " + activeValueStyle.Render(timeValue) + "\n")
+	} else {
+		b.WriteString(labelStyle.Render("时间:") + " " + normalValueStyle.Render(timeValue) + "\n")
 	}
 
-	for i, field := range fields {
-		labelStyle := lipgloss.NewStyle().Width(15)
-		valueStyle := lipgloss.NewStyle()
+	// Field 1: Province
+	provName := formProvinceName(a.formProvinceCursor, a.formProvinces)
+	if a.formFieldCursor == 1 {
+		b.WriteString(labelStyle.Render("省份:") + " " + activeValueStyle.Render(provName) + "\n")
+	} else {
+		b.WriteString(labelStyle.Render("省份:") + " " + normalValueStyle.Render(provName) + "\n")
+	}
 
-		if a.stationSelecting && i == 1 {
-			// Special handling for station selection
-			b.WriteString(labelStyle.Render(field.label+":") + " " + a.styles.Selected.Render(field.value) + "\n")
-		} else if !a.stationSelecting && i == 0 {
-			// Time input field
-			b.WriteString(labelStyle.Render(field.label+":") + " " + a.styles.Selected.Render(field.value) + "\n")
-		} else {
-			b.WriteString(labelStyle.Render(field.label+":") + " " + valueStyle.Render(field.value) + "\n")
+	// Field 2: Station
+	stationName := "请选择电台"
+	if s := a.findSelectedStation(); s != nil {
+		stationName = s.Title
+	}
+	if a.formStationsLoading {
+		stationName = "加载中..."
+	}
+	if a.formFieldCursor == 2 {
+		b.WriteString(labelStyle.Render("电台:") + " " + activeValueStyle.Render(stationName) + "\n")
+	} else {
+		b.WriteString(labelStyle.Render("电台:") + " " + normalValueStyle.Render(stationName) + "\n")
+	}
+	// Show station list when station field is active
+	if a.formFieldCursor == 2 && len(a.formStations) > 0 {
+		for i, st := range a.formStations {
+			prefix := "  "
+			if i == a.formStationCursor {
+				prefix = "> "
+				b.WriteString("    " + a.styles.Selected.Render(prefix+st.Title) + "\n")
+			} else {
+				b.WriteString("    " + normalValueStyle.Render(prefix+st.Title) + "\n")
+			}
 		}
 	}
 
-	b.WriteString("\n")
+	// Field 3: Enabled
+	enabledText := "启用"
+	if !a.formSchedule.Enabled {
+		enabledText = "禁用"
+	}
+	if a.formFieldCursor == 3 {
+		b.WriteString(labelStyle.Render("状态:") + " " + activeValueStyle.Render(enabledText) + "\n")
+	} else {
+		b.WriteString(labelStyle.Render("状态:") + " " + normalValueStyle.Render(enabledText) + "\n")
+	}
 
-	// Help text
-	helpText := "↑/↓ 切换字段 | Enter 选择/确认 | Esc 取消 | Ctrl+S 保存"
+	b.WriteString("\n")
+	if a.lastError != "" {
+		if a.lastError == "保存成功！" {
+			successStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Bold(true)
+			b.WriteString(successStyle.Render("✓ " + a.lastError) + "\n\n")
+		} else {
+			b.WriteString(a.styles.Error.Render("✗ " + a.lastError) + "\n\n")
+		}
+	}
+	helpText := "Tab 切换字段 | ↑↓ 修改 | ←→ 修改 | Enter 保存 | Esc 取消"
 	b.WriteString(a.styles.Help.Render(helpText))
 
 	return b.String()
@@ -626,7 +875,6 @@ func (a *App) renderMainUI() string {
 }
 
 func (a *App) renderProvincePanel(width, height int) string {
-	// 所有行统一用 rowStyle，宽度固定为 width，无额外 padding
 	rowStyle := lipgloss.NewStyle().Width(width)
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("81")).Width(width)
 	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("238")).Width(width)
@@ -657,7 +905,6 @@ func (a *App) renderProvincePanel(width, height int) string {
 }
 
 func (a *App) renderStationPanel(width, height int) string {
-	// 所有行统一用 rowStyle，宽度固定为 width，无额外 padding
 	rowStyle := lipgloss.NewStyle().Width(width)
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("81")).Width(width)
 	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("238")).Width(width)
@@ -674,7 +921,9 @@ func (a *App) renderStationPanel(width, height int) string {
 
 	if len(a.stations) == 0 {
 		emptyText := "当前省份暂无电台"
-		if a.inlineLoading {
+		if a.initialLoading {
+			emptyText = "正在加载..."
+		} else if a.inlineLoading {
 			emptyText = "正在切换省份..."
 		}
 		lines = append(lines, mutedStyle.Render(emptyText))
@@ -726,19 +975,220 @@ func windowRange(total, visible, cursor int) (int, int) {
 		return 0, total
 	}
 
-	start := max(0, cursor - visible/2)
-	end := min(total, start + visible)
+	start := max(0, cursor-visible/2)
+	end := min(total, start+visible)
 
 	// Adjust start if end was clamped
-	if end - start < visible {
-		start = max(0, end - visible)
+	if end-start < visible {
+		start = max(0, end-visible)
 	}
 
 	return start, end
 }
 
+// formProvinceCode returns the province code for the currently selected form province.
+func (a *App) formProvinceCode() int {
+	if len(a.formProvinces) == 0 || a.formProvinceCursor >= len(a.formProvinces) {
+		return 0
+	}
+	return a.formProvinces[a.formProvinceCursor].Code
+}
+
+// handleStationSwitched updates UI selection when scheduler triggers a station switch.
+// It finds the correct province cursor, selects the province, and positions the cursor
+// on the switched station.
+func (a *App) handleStationSwitched(info StationSwitchedInfo) (tea.Model, tea.Cmd) {
+	// Find province cursor matching ProvinceCode
+	newProvinceCursor := -1
+	for i, prov := range a.provinces {
+		if prov.Code == info.ProvinceCode {
+			newProvinceCursor = i
+			break
+		}
+	}
+
+	if newProvinceCursor == -1 {
+		// Province not found, just update stations if already on correct province
+		if fmt.Sprintf("%d", info.ProvinceCode) == a.provinceFilter {
+			// Find station cursor
+			for i, st := range a.stations {
+				if st.ContentID == info.Station.ContentID {
+					a.cursor = i
+					break
+				}
+			}
+		}
+		return a, nil
+	}
+
+	// Check if already on the correct province
+	provinceFilterStr := fmt.Sprintf("%d", info.ProvinceCode)
+	if a.provinceFilter == provinceFilterStr {
+		// Province already selected, just update station cursor
+		for i, st := range a.stations {
+			if st.ContentID == info.Station.ContentID {
+				a.cursor = i
+				break
+			}
+		}
+		return a, nil
+	}
+
+	// Switch province and station
+	a.provinceCursor = newProvinceCursor
+	a.provinceFilter = provinceFilterStr
+	a.cursor = 0
+	a.stations = nil
+	a.loading = true
+	a.inlineLoading = true
+	a.err = nil
+	a.lastError = ""
+	// Store the target station ID to select after stations load
+	a.schedulerTargetStationID = info.Station.ContentID
+	return a, a.fetchStationsWithFilter(provinceFilterStr)
+}
+
+// findSelectedStation returns the currently selected station by looking up
+// selectedStationID in formStations. Returns nil if not found.
+func (a *App) findSelectedStation() *radio.Station {
+	if a.selectedStationID == "" {
+		return nil
+	}
+	for i := range a.formStations {
+		if a.formStations[i].ContentID == a.selectedStationID {
+			return &a.formStations[i]
+		}
+	}
+	return nil
+}
+
+// formProvinceName returns the province name for a given cursor position.
+// formProvinces includes "国家台" (code=0) at index 0, followed by actual provinces.
+func formProvinceName(cursor int, provinces []radio.Province) string {
+	if cursor < 0 || cursor >= len(provinces) {
+		return "国家台"
+	}
+	return provinces[cursor].ProvinceName
+}
+
+// provinceName returns the province name for a given province code.
+func provinceName(code int, provinces []radio.Province) string {
+	if code == 0 {
+		return "国家台"
+	}
+	for _, p := range provinces {
+		if p.Code == code {
+			return p.ProvinceName
+		}
+	}
+	return fmt.Sprintf("%d", code)
+}
+
 func (a *App) saveConfig() error {
 	return config.SaveConfig(a.cfg)
+}
+
+func (a *App) saveScheduleForm() error {
+	defer func() {
+		if r := recover(); r != nil {
+			debugLog(fmt.Sprintf("saveScheduleForm PANIC recovered: %v", r))
+		}
+	}()
+
+	if a.formStationsLoading {
+		a.lastError = "电台列表加载中，请稍候"
+		debugLog("saveScheduleForm: stations still loading, cannot save")
+		return fmt.Errorf("电台列表加载中")
+	}
+
+	s := a.findSelectedStation()
+	if s == nil {
+		a.lastError = "请先选择电台"
+		debugLog(fmt.Sprintf("saveScheduleForm: station not found, selectedStationID=%q, formStations=%d", a.selectedStationID, len(a.formStations)))
+		return fmt.Errorf("请先选择电台")
+	}
+	debugLog(fmt.Sprintf("saveScheduleForm: found station %s (%s)", s.Title, s.ContentID))
+	a.formSchedule.StationID = s.ContentID
+	a.formSchedule.StationName = s.Title
+	a.formSchedule.Time = a.timeInput
+	a.formSchedule.ProvinceCode = a.formProvinceCode()
+	debugLog(fmt.Sprintf("saveScheduleForm: formSchedule StationID=%q StationName=%q Time=%q ProvinceCode=%d",
+		a.formSchedule.StationID, a.formSchedule.StationName, a.formSchedule.Time, a.formSchedule.ProvinceCode))
+
+	// Sync a.schedules and a.cfg.Schedules before modifying them
+	if a.cfg.Schedules == nil {
+		a.cfg.Schedules = a.schedules
+	}
+	debugLog(fmt.Sprintf("saveScheduleForm: before save - a.schedules len=%d cap=%d, cfg.Schedules len=%d cap=%d",
+		len(a.schedules), cap(a.schedules), len(a.cfg.Schedules), cap(a.cfg.Schedules)))
+
+	if a.formSchedule.ID == "" {
+		a.formSchedule.ID = uuid.New().String()
+		a.formSchedule.CreatedAt = time.Now().Unix()
+		if cap(a.schedules) > 0 {
+			a.schedules = append(a.schedules, a.formSchedule)
+		} else {
+			a.schedules = []config.Schedule{a.formSchedule}
+		}
+		debugLog(fmt.Sprintf("saveScheduleForm: NEW added, total schedules=%d", len(a.schedules)))
+	} else {
+		debugLog(fmt.Sprintf("saveScheduleForm: existing schedule update, searching for ID=%q", a.formSchedule.ID))
+		found := false
+		for i, sch := range a.schedules {
+			if sch.ID == a.formSchedule.ID {
+				a.schedules[i] = a.formSchedule
+				found = true
+				debugLog(fmt.Sprintf("saveScheduleForm: updated at index %d, total schedules=%d", i, len(a.schedules)))
+				break
+			}
+		}
+		if !found {
+			// Schedule ID not found, add as new
+			if cap(a.schedules) > 0 {
+				a.schedules = append(a.schedules, a.formSchedule)
+			} else {
+				a.schedules = []config.Schedule{a.formSchedule}
+			}
+			debugLog(fmt.Sprintf("saveScheduleForm: ID not found, added as new, total=%d", len(a.schedules)))
+		}
+	}
+
+	a.cfg.Schedules = a.schedules
+	debugLog(fmt.Sprintf("saveScheduleForm: after save - a.schedules len=%d, cfg.Schedules len=%d",
+		len(a.schedules), len(a.cfg.Schedules)))
+	if err := a.saveConfig(); err != nil {
+		a.lastError = fmt.Sprintf("保存失败: %v", err)
+		debugLog(fmt.Sprintf("saveScheduleForm: saveConfig ERROR: %v", err))
+		return err
+	}
+	debugLog(fmt.Sprintf("saveScheduleForm: SUCCESS, view switching to ScheduleListView"))
+	a.scheduler.UpdateConfig(a.cfg)
+	a.lastError = "保存成功！"
+	a.currentView = ScheduleListView
+	return nil
+}
+
+// adjustTime adjusts the time by delta minutes. delta can be -1 or +1.
+func (a *App) adjustTime(delta int) {
+	parts := strings.Split(a.timeInput, ":")
+	if len(parts) != 2 {
+		a.timeInput = "00:00"
+		return
+	}
+	h, err := strconv.Atoi(parts[0])
+	if err != nil {
+		h = 0
+	}
+	m, err := strconv.Atoi(parts[1])
+	if err != nil {
+		m = 0
+	}
+	total := h*60 + m + delta
+	if total < 0 {
+		total = 24*60 + total
+	}
+	total = total % (24 * 60)
+	a.timeInput = fmt.Sprintf("%02d:%02d", total/60, total%60)
 }
 
 func truncateRunes(s string, limit int) string {

@@ -95,3 +95,52 @@ func (c *Client) GetProvinces() ([]Province, error) {
 
 	return result.Data, nil
 }
+
+// FindStationByID searches for a station by contentId.
+// If provinceCode != 0, searches within that province.
+// Otherwise, searches across all provinces.
+func (c *Client) FindStationByID(stationID string, provinceCode int) (*Station, error) {
+	if provinceCode != 0 {
+		stations, err := c.GetStationsByFilter("0", fmt.Sprintf("%d", provinceCode))
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch stations for province %d: %w", provinceCode, err)
+		}
+		for i := range stations {
+			if stations[i].ContentID == stationID {
+				return &stations[i], nil
+			}
+		}
+		return nil, nil
+	}
+
+	// Deep search: try all provinces
+	provinces, err := c.GetProvinces()
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch provinces: %w", err)
+	}
+
+	// Search national stations first (provinceCode=0)
+	stations, err := c.GetStationsByFilter("0", "0")
+	if err == nil {
+		for i := range stations {
+			if stations[i].ContentID == stationID {
+				return &stations[i], nil
+			}
+		}
+	}
+
+	// Search each province
+	for _, prov := range provinces {
+		stations, err := c.GetStationsByFilter("0", fmt.Sprintf("%d", prov.Code))
+		if err != nil {
+			continue
+		}
+		for i := range stations {
+			if stations[i].ContentID == stationID {
+				return &stations[i], nil
+			}
+		}
+	}
+
+	return nil, nil
+}

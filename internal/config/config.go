@@ -6,14 +6,29 @@ import (
 	"path/filepath"
 )
 
+// configDir returns the directory where config files are stored.
+// On Windows it uses USERPROFILE, on Unix it uses HOME.
+func configDir() string {
+	home := os.Getenv("HOME")
+	if home == "" {
+		home = os.Getenv("USERPROFILE")
+	}
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+	if home == "" {
+		home = "."
+	}
+	return filepath.Join(home, ".radio-cmd")
+}
+
 // Schedule represents a scheduled playback
 type Schedule struct {
 	ID          string `json:"id"`
 	StationID   string `json:"station_id"`
 	StationName string `json:"station_name"`
-	// Time format: "15:04" for daily, "2006-01-02T15:04" for one-time
-	PlayTime    string `json:"play_time"`
-	Recurring   bool   `json:"recurring"` // true for daily, false for one-time
+	ProvinceCode int   `json:"province_code"`
+	Time        string `json:"time"` // HH:mm format (24-hour)
 	Enabled     bool   `json:"enabled"`
 	CreatedAt   int64  `json:"created_at"`
 }
@@ -46,11 +61,11 @@ func DefaultConfig() *Config {
 
 // LoadConfig loads configuration from file
 func LoadConfig() (*Config, error) {
-	configDir := filepath.Join(os.Getenv("HOME"), ".radio-cmd")
-	configFile := filepath.Join(configDir, "config.json")
+	dir := configDir()
+	configFile := filepath.Join(dir, "config.json")
 
 	// Create config directory if it doesn't exist
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}
 
@@ -78,7 +93,7 @@ func LoadConfig() (*Config, error) {
 
 // SaveConfig saves configuration to file
 func SaveConfig(config *Config) error {
-	configDir := filepath.Join(os.Getenv("HOME"), ".radio-cmd")
+	configDir := configDir()
 	configFile := filepath.Join(configDir, "config.json")
 
 	// Create config directory if it doesn't exist
