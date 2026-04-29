@@ -208,10 +208,7 @@ func (a *App) Start() error {
 
 // Init implements tea.Model
 func (a *App) Init() tea.Cmd {
-	return tea.Batch(
-		a.fetchStations,
-		a.fetchProvinces,
-	)
+	return a.fetchProvinces
 }
 
 // Update implements tea.Model
@@ -228,14 +225,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handleKeyPress(msg)
 
 	case stationsFetchedMsg:
-		a.loading = false
-		a.inlineLoading = false
-		a.initialLoading = false
 		// If the response doesn't match the currently selected province, discard it
-		// The old stations (from the correct province) remain displayed
 		if msg.provinceFilter != a.provinceFilter {
 			return a, nil
 		}
+		a.loading = false
+		a.inlineLoading = false
+		a.initialLoading = false
 		if msg.err != nil {
 			a.err = msg.err
 			a.lastError = fmt.Sprintf("Failed to fetch stations: %v", msg.err)
@@ -269,19 +265,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		a.provinces = msg.provinces
-		prevCursor := a.provinceCursor
-		prevFilter := a.provinceFilter
 		a.syncProvinceCursor()
-		a.initialLoading = false
 
-		// Check if we need to reload stations for the correct province
-		// This handles the case where DefaultProvince is "0" (all) but we want the first province
-		if a.provinceCursor != prevCursor || a.provinceFilter != prevFilter {
-			a.cursor = 0
-			a.stations = nil
-			return a, a.applyProvinceSelection()
+		if len(a.provinces) == 0 {
+			return a, nil
 		}
-		return a, nil
+
+		// Sync provinceFilter to match the actual selected province,
+		// then fetch stations for it.
+		newFilter := strconv.Itoa(a.provinces[a.provinceCursor].Code)
+		a.provinceFilter = newFilter
+		a.cursor = 0
+		a.stations = nil
+		a.loading = true
+		return a, a.fetchStationsWithFilter(newFilter)
 
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
