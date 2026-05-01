@@ -144,25 +144,25 @@ type App struct {
 	initialLoading bool
 
 	// Schedule related fields
-	currentView      ViewMode
-	schedules        []config.Schedule
-	scheduleCursor   int
-	formSchedule     config.Schedule
-	timeInput        string
+	currentView       ViewMode
+	schedules         []config.Schedule
+	scheduleCursor    int
+	formSchedule      config.Schedule
+	timeInput         string
 	selectedStationID string
-	scheduler        *Scheduler
+	scheduler         *Scheduler
 
 	// Schedule form: province/station selection state
-	formProvinceCursor   int
-	formStationCursor    int
-	formFieldCursor      int // 0=time, 1=province, 2=station, 3=enabled
-	formProvinces        []radio.Province
-	formStations         []radio.Station
-	formStationsLoading  bool
+	formProvinceCursor  int
+	formStationCursor   int
+	formFieldCursor     int // 0=time, 1=province, 2=station, 3=enabled
+	formProvinces       []radio.Province
+	formStations        []radio.Station
+	formStationsLoading bool
 
 	// Channel for scheduler to notify about station switches
-	stationSwitchedCh          chan StationSwitchedInfo
-	schedulerTargetStationID   string  // used by scheduler to select station after province switch
+	stationSwitchedCh        chan StationSwitchedInfo
+	schedulerTargetStationID string // used by scheduler to select station after province switch
 }
 
 // NewApp creates a new TUI application
@@ -179,18 +179,18 @@ func NewApp() *App {
 	scheduler.Start()
 
 	return &App{
-		client:           client,
-		player:           player,
-		cfg:              cfg,
-		styles:           NewStyles(),
-		provinceFilter:   cfg.DefaultProvince,
-		provinceCursor:   0,
-		loading:          true,
-		initialLoading:   true,
-		currentView:      MainView,
-		schedules:        cfg.Schedules,
-		timeInput:        time.Now().Format("15:04"),
-		scheduler:        scheduler,
+		client:            client,
+		player:            player,
+		cfg:               cfg,
+		styles:            NewStyles(),
+		provinceFilter:    cfg.DefaultProvince,
+		provinceCursor:    0,
+		loading:           true,
+		initialLoading:    true,
+		currentView:       MainView,
+		schedules:         cfg.Schedules,
+		timeInput:         time.Now().Format("15:04"),
+		scheduler:         scheduler,
 		stationSwitchedCh: stationSwitchedCh,
 	}
 }
@@ -497,11 +497,11 @@ func (a *App) handleScheduleListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "n", "N":
 		// Create new schedule
 		a.formSchedule = config.Schedule{
-			ID:          uuid.New().String(),
-			CreatedAt:   time.Now().Unix(),
-			Enabled:     true,
+			ID:           uuid.New().String(),
+			CreatedAt:    time.Now().Unix(),
+			Enabled:      true,
 			ProvinceCode: 0,
-			Time:        time.Now().Format("15:04"),
+			Time:         time.Now().Format("15:04"),
 		}
 		a.timeInput = a.formSchedule.Time
 		a.formFieldCursor = 0
@@ -817,9 +817,9 @@ func (a *App) renderScheduleForm() string {
 	if a.lastError != "" {
 		if a.lastError == "保存成功！" {
 			successStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Bold(true)
-			b.WriteString(successStyle.Render("✓ " + a.lastError) + "\n\n")
+			b.WriteString(successStyle.Render("✓ "+a.lastError) + "\n\n")
 		} else {
-			b.WriteString(a.styles.Error.Render("✗ " + a.lastError) + "\n\n")
+			b.WriteString(a.styles.Error.Render("✗ "+a.lastError) + "\n\n")
 		}
 	}
 	helpText := "Tab 切换字段 | ↑↓ 修改 | ←→ 修改 | Enter 保存 | Esc 取消"
@@ -831,14 +831,14 @@ func (a *App) renderScheduleForm() string {
 func (a *App) renderMainUI() string {
 	var b strings.Builder
 
-	leftWidth := 26
-	rightWidth := 58
 	gapWidth := 2
+	totalWidth := 86
+	leftWidth := 24
 	if a.width > 0 {
-		innerWidth := max(48, a.width-2)
-		leftWidth = max(24, min(32, innerWidth/3))
-		rightWidth = max(36, innerWidth-leftWidth-gapWidth)
+		totalWidth = max(48, a.width-2)
+		leftWidth = max(20, min(24, totalWidth/4))
 	}
+	rightWidth := max(24, totalWidth-leftWidth-gapWidth)
 	contentHeight := max(8, a.height-3)
 
 	provincePanel := a.renderProvincePanel(leftWidth, contentHeight)
@@ -880,7 +880,7 @@ func (a *App) renderProvincePanel(width, height int) string {
 
 	var lines []string
 	lines = append(lines, titleStyle.Render("省份"))
-	lines = append(lines, sepStyle.Render(strings.Repeat("─", max(1, width))))
+	lines = append(lines, sepStyle.Render(strings.Repeat("-", max(1, width))))
 
 	visibleHeight := max(1, height-5)
 	start, end := windowRange(len(a.provinces), visibleHeight, a.provinceCursor)
@@ -914,7 +914,7 @@ func (a *App) renderStationPanel(width, height int) string {
 
 	var lines []string
 	lines = append(lines, titleStyle.Render("电台列表"))
-	lines = append(lines, sepStyle.Render(strings.Repeat("─", max(1, width))))
+	lines = append(lines, sepStyle.Render(strings.Repeat("-", max(1, width))))
 
 	if len(a.stations) == 0 {
 		emptyText := "当前省份暂无电台"
