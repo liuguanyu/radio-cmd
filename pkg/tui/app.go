@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -163,6 +164,9 @@ type App struct {
 	// Channel for scheduler to notify about station switches
 	stationSwitchedCh        chan StationSwitchedInfo
 	schedulerTargetStationID string // used by scheduler to select station after province switch
+
+	// Random station selection
+	randomStationPending bool
 }
 
 // NewApp creates a new TUI application
@@ -251,6 +255,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Clear after use
 			a.schedulerTargetStationID = ""
+		} else if a.randomStationPending {
+			a.randomStationPending = false
+			if len(a.stations) > 0 {
+				a.cursor = rand.Intn(len(a.stations))
+				station := &a.stations[a.cursor]
+				if err := a.player.Play(station); err != nil {
+					a.err = err
+					a.lastError = err.Error()
+				}
+			}
 		} else if len(a.stations) == 0 {
 			a.cursor = 0
 		} else if a.cursor >= len(a.stations) {
@@ -433,6 +447,9 @@ func (a *App) handleMainViewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		a.loading = true
 		return a, a.fetchStations
+
+	case "f":
+		return a.handleRandomStation()
 
 	case "s":
 		// Switch to schedule list view
@@ -676,6 +693,16 @@ func (a *App) applyProvinceSelection() tea.Cmd {
 	return a.fetchStationsWithFilter(provinceFilter)
 }
 
+func (a *App) handleRandomStation() (tea.Model, tea.Cmd) {
+	if len(a.provinces) == 0 {
+		return a, nil
+	}
+	randomIndex := rand.Intn(len(a.provinces))
+	a.provinceCursor = randomIndex
+	a.randomStationPending = true
+	return a, a.applyProvinceSelection()
+}
+
 func (a *App) syncProvinceCursor() {
 	if len(a.provinces) == 0 {
 		a.provinceCursor = 0
@@ -860,7 +887,7 @@ func (a *App) renderMainUI() string {
 
 	statusWidth := leftWidth + gapWidth + rightWidth
 	helpContent := fmt.Sprintf(
-		"状态：%s | 省份：%s | 电台：%d | W/S 选台 | A/D 切省 | Enter/Space 播放 | X 停止 | R 刷新 | S 计划 | Q 退出",
+		"状态：%s | 省份：%s | 电台：%d | W/S 选台 | A/D 切省 | Enter/Space 播放 | X 停止 | F 随机挑台 | R 刷新 | S 计划 | Q 退出",
 		statusText,
 		a.currentProvinceName(),
 		len(a.stations),
