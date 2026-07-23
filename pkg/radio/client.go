@@ -1,10 +1,15 @@
 package radio
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -12,6 +17,8 @@ const (
 	BaseURL          = "https://ytmsout.radio.cn"
 	StationListPath  = "/web/appBroadcast/list"
 	ProvinceListPath = "/web/appProvince/list/all"
+
+	apiKey = "f0fc4c668392f9f9a447e48584c214ee"
 )
 
 // Province represents a province for regional stations
@@ -45,9 +52,11 @@ func (c *Client) GetStations() ([]Station, error) {
 
 // GetStationsByFilter fetches stations filtered by category and province
 func (c *Client) GetStationsByFilter(categoryID, provinceCode string) ([]Station, error) {
-	url := fmt.Sprintf("%s%s?categoryId=%s&provinceCode=%s", c.baseURL, StationListPath, categoryID, provinceCode)
+	params := map[string]string{"categoryId": categoryID, "provinceCode": provinceCode}
+	query := url.Values{"categoryId": {categoryID}, "provinceCode": {provinceCode}}
+	requestURL := fmt.Sprintf("%s%s?%s", c.baseURL, StationListPath, query.Encode())
 
-	resp, err := c.httpClient.Get(url)
+	resp, err := c.doRequest(requestURL, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch stations: %w", err)
 	}
@@ -72,9 +81,9 @@ func (c *Client) GetStationsByFilter(categoryID, provinceCode string) ([]Station
 
 // GetProvinces fetches the list of provinces
 func (c *Client) GetProvinces() ([]Province, error) {
-	url := fmt.Sprintf("%s%s", c.baseURL, ProvinceListPath)
+	requestURL := fmt.Sprintf("%s%s", c.baseURL, ProvinceListPath)
 
-	resp, err := c.httpClient.Get(url)
+	resp, err := c.doRequest(requestURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch provinces: %w", err)
 	}
@@ -86,14 +95,53 @@ func (c *Client) GetProvinces() ([]Province, error) {
 	}
 
 	var result struct {
-		Code int        `json:"code"`
-		Data []Province `json:"data"`
+		Code    int        `json:"code"`
+		Message string     `json:"message"`
+		Data    []Province `json:"data"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
+	if result.Code != 0 {
+		return nil, fmt.Errorf("API returned error: %s", result.Message)
+	}
 
 	return result.Data, nil
+}
+
+func (c *Client) doRequest(url string, params map[string]string) (*http.Response, error) {
+	timestamp := time.Now().UnixMilli()
+	parts := make([]string, 0, len(params))
+	for key, value := range params {
+		parts = append(parts, key+"="+value)
+	}
+	sort.Strings(parts)
+	canonical := strings.Join(parts, "&")
+	if canonical != "" {
+		canonical += "&"
+	}
+	canonical += fmt.Sprintf("timestamp=%d&key=%s", timestamp, apiKey)
+	sum := md5.Sum([]byte(canonical))
+
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("equipmentId", "0000")
+	req.Header.Set("platformCode", "WEB")
+	req.Header.Set("timestamp", fmt.Sprintf("%d", timestamp))
+	req.Header.Set("sign", strings.ToUpper(hex.EncodeToString(sum[:])))
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		resp.Body.Close()
+		return nil, fmt.Errorf("API returned HTTP status %s", resp.Status)
+	}
+	return resp, nil
 }
 
 // FindStationByID searches for a station by contentId.

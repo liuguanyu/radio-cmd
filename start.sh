@@ -1,13 +1,13 @@
 #!/bin/bash
+set -e
+
 # Radio.cn CLI Player - Start Script
 
 echo "📻 Starting Radio.cn CLI Player..."
 
-# Check if binary exists
-if [ ! -f "radio-cmd" ]; then
-    echo "Building radio-cmd..."
-    go build -o radio-cmd ./cmd/radio-cmd
-fi
+# Always build the current source so stale binaries cannot hide fixes
+echo "Building radio-cmd..."
+go build -o radio-cmd ./cmd/radio-cmd
 
 # Run the application
 ./radio-cmd
